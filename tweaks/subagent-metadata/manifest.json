@@ -1,0 +1,11 @@
+{
+  "id": "local.subagent-metadata",
+  "name": "Subagent Model Details",
+  "version": "0.1.0",
+  "description": "Shows available model and reasoning metadata in the subagents panel.",
+  "scope": "renderer",
+  "main": "index.js",
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}

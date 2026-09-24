@@ -1,0 +1,11 @@
+{
+  "id": "local.shell-display-fixes",
+  "name": "Shell Display Fixes",
+  "version": "0.2.0",
+  "description": "Normalizes MSYS bootstrap prefixes in displayed shell commands.",
+  "scope": "renderer",
+  "main": "index.js",
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}

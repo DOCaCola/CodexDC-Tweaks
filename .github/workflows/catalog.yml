@@ -1,0 +1,44 @@
+name: Test and publish catalog
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run catalog
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog
+          path: dist/index.json
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: catalog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: catalog
+          path: dist
+      - name: Publish commit-pinned index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view catalog >/dev/null 2>&1; then
+            gh release create catalog --target "$GITHUB_SHA" --title "CodexDC tweak catalog" --notes "Each entry pins the exact reviewed source commit and tweak directory." --latest=false
+          fi
+          gh release upload catalog dist/index.json --clobber

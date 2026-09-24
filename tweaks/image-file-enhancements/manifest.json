@@ -1,0 +1,14 @@
+{
+  "id": "local.image-file-enhancements",
+  "name": "Image Preview Refresh",
+  "version": "0.3.1",
+  "description": "Refreshes local chat images when files change on disk.",
+  "scope": "renderer",
+  "main": "index.js",
+  "permissions": [
+    "filesystem"
+  ],
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}

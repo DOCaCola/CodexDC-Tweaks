@@ -1,0 +1,14 @@
+{
+  "name": "codexdc-tweaks",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "catalog": "node scripts/catalog.mjs"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

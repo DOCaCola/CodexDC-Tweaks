@@ -1,0 +1,14 @@
+{
+  "id": "local.restart-session-command",
+  "name": "Restart Session Command",
+  "version": "0.1.0",
+  "description": "Adds /restart-session to restart and reconnect the local Codex backend.",
+  "scope": "renderer",
+  "main": "index.js",
+  "permissions": [
+    "codex-runtime"
+  ],
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}
