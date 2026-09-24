@@ -109,3 +109,14 @@ test("shell display collapses nested mutation roots", () => {
     [parent, sibling],
   );
 });
+
+test("shell display observes React text updates and leaves editable content untouched", () => {
+  const text = { nodeType: 3, parentNode: null };
+  assert.deepEqual(tweak.__test.collectMutationRoots([{ type: "characterData", target: text }]), [text]);
+  const editorText = {
+    nodeValue: "export MSYSTEM=UCRT64; echo draft",
+    parentElement: { closest: () => ({ isContentEditable: true }) },
+  };
+  assert.equal(tweak.__test.normalizeTextNode(editorText), false);
+  assert.equal(editorText.nodeValue, "export MSYSTEM=UCRT64; echo draft");
+});

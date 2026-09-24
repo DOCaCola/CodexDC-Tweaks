@@ -1,7 +1,7 @@
 {
   "id": "local.shell-display-fixes",
   "name": "Shell Display Fixes",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Normalizes MSYS bootstrap prefixes in displayed shell commands.",
   "scope": "renderer",
   "main": "index.js",

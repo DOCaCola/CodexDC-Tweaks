@@ -1,7 +1,7 @@
 {
   "id": "local.message-timestamps",
   "name": "Message Timestamps",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Keeps timestamps visible on selected sent prompts and final assistant messages.",
   "scope": "renderer",
   "main": "index.js",

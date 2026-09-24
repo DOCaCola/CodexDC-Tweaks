@@ -5,14 +5,10 @@ Install and update them from the **Tweak Store** inside CodexDC.
 
 | Tweak | Purpose |
 | --- | --- |
-| Collapsed Command Counts | Show command counts in collapsed activity |
 | Hide Get Plus Button | Hide the profile upgrade control |
-| Image Preview Refresh | Refresh previews when local image files change |
-| Interrupt Stop Guard | Prevent an accidental repeated stop |
 | Message Timestamps | Display message timestamps |
 | Restart Session Command | Add a command to restart the shared local backend |
 | Shell Display Fixes | Simplify displayed MSYS shell prefixes on Windows |
-| Subagent Model Details | Show model and reasoning details for subagents |
 
 Mac compatibility is pending real-app validation. The restart command affects
 the shared local backend, so finish active tasks before using it.

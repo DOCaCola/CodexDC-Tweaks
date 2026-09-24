@@ -124,7 +124,7 @@ test("message timestamp helpers find and reveal the native user timestamp branch
   };
 
   contentBranch.querySelectorAll = () => [];
-  root.querySelectorAll = () => [source];
+  root.querySelectorAll = (selector) => selector === "span.text-xs.text-tertiary" ? [source] : [];
 
   assert.equal(
     timestamps.__test.findDirectChildContaining(root, source),

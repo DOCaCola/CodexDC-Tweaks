@@ -41,6 +41,7 @@ function stripMsysPrefix(command) {
 
 function normalizeTextNode(node) {
   if (!node || typeof node.nodeValue !== "string") return false;
+  if (node.parentElement?.closest("input, textarea, [contenteditable]:not([contenteditable='false']), script, style")) return false;
 
   const value = node.nodeValue;
   if (normalizedValues.get(node) === value) return false;
@@ -73,6 +74,7 @@ function selectTopLevelRoots(nodes) {
 function collectMutationRoots(mutations) {
   const roots = [];
   for (const mutation of mutations) {
+    if (mutation.type === "characterData") roots.push(mutation.target);
     for (const node of mutation.addedNodes ?? []) roots.push(node);
   }
   return selectTopLevelRoots(roots);
@@ -183,6 +185,7 @@ function beginObserving() {
   });
   observer.observe(document.body, {
     childList: true,
+    characterData: true,
     subtree: true,
   });
 

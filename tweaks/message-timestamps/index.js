@@ -2,7 +2,7 @@
 
 const STYLE_ID = "codexpp-message-timestamps-style";
 const USER_BUBBLE_SELECTOR = "[data-user-message-bubble]";
-const NATIVE_TIMESTAMP_CANDIDATE_SELECTOR = "span.text-xs.text-token-text-tertiary";
+const NATIVE_TIMESTAMP_CANDIDATE_SELECTOR = "span.text-xs.text-tertiary";
 const USER_TIMESTAMP_SELECTOR = "[data-codexpp-message-timestamp='user']";
 const NATIVE_USER_TIMESTAMP_ATTR = "data-codexpp-native-user-message-sent-time";
 const ASSISTANT_TIMESTAMP_SELECTOR = "[data-assistant-message-sent-time]";
