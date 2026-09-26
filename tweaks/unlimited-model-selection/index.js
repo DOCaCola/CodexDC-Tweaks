@@ -1,153 +1,107 @@
 "use strict";
 
-/**
- * Codex serves its model catalog through the app host MessagePort. For the
- * ChatGPT-backed host the catalog carries a `versions` array that groups models
- * into rollout bundles, and the renderer turns that into `versionOptions`. The
- * picker only ever offers the models of the group the current selection belongs
- * to, and when quota runs out the app moves the selection to the Luna Reserve
- * group — after which the picker is stuck on Luna.
- *
- * Empties `versions` on every catalog that crosses the port. The renderer treats
- * a catalog without version groups as ungrouped and falls back to the flat
- * option list, so every model stays selectable regardless of quota.
- */
+const { readFileSync, readdirSync } = require("node:fs");
+const { join } = require("node:path");
+const { randomUUID } = require("node:crypto");
+const { configureReserveMode } = require("./reserve-mode.js");
 
-const { MessagePort } = require("node:worker_threads");
+const STATE_KEY = "__codexdcUnlimitedModelSelection__";
+const QUEUE_KEY = Symbol.for("codexdc.unlimited-model-selection.queues");
 
-const MAX_SCAN_NODES = 20000;
-const MAX_SCAN_DEPTH = 32;
-const PATCH_FLAG = Symbol.for("codexdc.unlimited-model-selection");
-
-function isModelCatalog(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Array.isArray(value.versions) &&
-    Array.isArray(value.models) &&
-    Array.isArray(value.categories)
-  );
+// Discover the feature layer from the installed renderer, not a minified name
+// or a catalog response. Refuse an unsupported build rather than report success.
+function findReserveLayer(source) {
+  const matches = [...source.matchAll(
+    /[$\w]+\([$ \w]+,[`'"]([^`'"]+)[`'"],\{disableExposureLog:!0\}\)\.get\([`'"]reserve_enabled[`'"],!1\)/g,
+  )];
+  const layers = new Set(matches.map((match) => match[1]));
+  if (layers.size !== 1) {
+    throw new Error("Unsupported Codex build: expected one reserve_enabled feature layer");
+  }
+  return [...layers][0];
 }
 
-function childValues(value) {
-  if (Array.isArray(value)) return value;
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return [];
-  return Object.values(value);
+function readReserveLayer(appPath) {
+  const assets = join(appPath, "webview", "assets");
+  const files = readdirSync(assets).filter((name) => /^app-initial-.*\.js$/.test(name));
+  if (files.length !== 1) {
+    throw new Error("Unsupported Codex build: expected one app-initial renderer bundle");
+  }
+  return findReserveLayer(readFileSync(join(assets, files[0]), "utf8"));
 }
 
-/**
- * Empties `versions` on every model catalog reachable from `payload`.
- * Returns how many catalogs were rewritten.
- */
-function stripVersionGrouping(payload) {
-  const seen = new WeakSet();
-  const stack = [{ value: payload, depth: 0 }];
-  let rewritten = 0;
-  let budget = MAX_SCAN_NODES;
+function isAppPage(url) {
+  return /^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(url);
+}
 
-  while (stack.length > 0 && budget > 0) {
-    const { value, depth } = stack.pop();
-    if (value === null || typeof value !== "object") continue;
-    if (seen.has(value)) continue;
-    seen.add(value);
-    budget -= 1;
+function createController(host, layer, log, queues) {
+  const owner = randomUUID();
+  const pages = new Map();
+  let active = true;
 
-    if (isModelCatalog(value)) {
-      if (value.versions.length > 0) {
-        value.versions = [];
-        rewritten += 1;
+  function enqueue(contents, enabled) {
+    const previous = queues.get(contents) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      if (contents.isDestroyed() || !isAppPage(contents.getURL()) || (enabled && !active)) return;
+      const args = JSON.stringify({ key: STATE_KEY, owner, layer, enabled });
+      const result = await contents.executeJavaScript(`(${configureReserveMode})(${args})`);
+      if (enabled) log.info("Reserve model-selection override", { window: contents.id, ...result });
+    }).catch((error) => {
+      if (!contents.isDestroyed()) log.error("Reserve model-selection override failed", error);
+    });
+    queues.set(contents, next);
+    return next;
+  }
+
+  function attach(contents) {
+    if (pages.has(contents)) return;
+    const ready = () => { void enqueue(contents, true); };
+    const destroyed = () => { pages.delete(contents); };
+    pages.set(contents, { ready, destroyed });
+    contents.on("dom-ready", ready);
+    contents.once("destroyed", destroyed);
+    ready();
+  }
+
+  const created = (_event, contents) => attach(contents);
+  host.app.on("web-contents-created", created);
+  for (const contents of host.webContents.getAllWebContents()) attach(contents);
+
+  return {
+    async stop() {
+      active = false;
+      host.app.removeListener("web-contents-created", created);
+      const pending = [];
+      for (const [contents, { ready, destroyed }] of pages) {
+        contents.removeListener("dom-ready", ready);
+        contents.removeListener("destroyed", destroyed);
+        pending.push(enqueue(contents, false));
       }
-      continue;
-    }
-
-    if (depth >= MAX_SCAN_DEPTH) continue;
-    let children;
-    try {
-      children = childValues(value);
-    } catch {
-      continue;
-    }
-    for (const child of children) stack.push({ value: child, depth: depth + 1 });
-  }
-
-  return rewritten;
-}
-
-function messagePortPrototypes() {
-  const prototypes = new Set();
-  if (typeof MessagePort === "function" && MessagePort.prototype) {
-    prototypes.add(MessagePort.prototype);
-  }
-  const globalPort = globalThis.MessagePort;
-  if (typeof globalPort === "function" && globalPort.prototype) {
-    prototypes.add(globalPort.prototype);
-  }
-  return [...prototypes];
-}
-
-/**
- * Wraps `postMessage` on `prototype` so catalogs are rewritten on their way to
- * the renderer. Returns a restore function, or null when already patched.
- */
-function patchPostMessage(prototype, onRewrite) {
-  if (typeof prototype.postMessage !== "function") return null;
-  if (prototype[PATCH_FLAG]) return null;
-
-  const original = prototype.postMessage;
-  function postMessage(value, ...rest) {
-    try {
-      const rewritten = stripVersionGrouping(value);
-      if (rewritten > 0) onRewrite(rewritten);
-    } catch (error) {
-      onRewrite(0, error);
-    }
-    return original.call(this, value, ...rest);
-  }
-
-  Object.defineProperty(prototype, PATCH_FLAG, { value: true, configurable: true });
-  prototype.postMessage = postMessage;
-  return () => {
-    if (prototype.postMessage === postMessage) {
-      prototype.postMessage = original;
-      delete prototype[PATCH_FLAG];
-    }
+      pages.clear();
+      await Promise.all(pending);
+    },
   };
 }
 
-let restores = [];
-let logged = 0;
+let controller;
 
 function start(api) {
-  for (const prototype of messagePortPrototypes()) {
-    const restore = patchPostMessage(prototype, (rewritten, error) => {
-      if (error) {
-        api.log.warn("model catalog scan failed:", error);
-        return;
-      }
-      logged += rewritten;
-      if (logged <= 5) {
-        api.log.info(`cleared version grouping on ${rewritten} model catalog(s)`);
-      }
-    });
-    if (restore) restores.push(restore);
-  }
-  api.log.info(`Unlimited Model Selection started (${restores.length} transport(s) patched)`);
+  // Owl is a custom Chromium host. Its Node compatibility API keeps this
+  // module name; no stock Electron process or worker-thread port is assumed.
+  const host = require("electron");
+  const layer = readReserveLayer(host.app.getAppPath());
+  const queues = globalThis[QUEUE_KEY] ??= new WeakMap();
+  controller = createController(host, layer, api.log, queues);
 }
 
 function stop() {
-  for (const restore of [...restores].reverse()) restore();
-  restores = [];
-  logged = 0;
+  const previous = controller;
+  controller = undefined;
+  return previous?.stop();
 }
 
 module.exports = {
   start,
   stop,
-  __test: {
-    isModelCatalog,
-    stripVersionGrouping,
-    patchPostMessage,
-    messagePortPrototypes,
-  },
+  __test: { findReserveLayer, readReserveLayer, isAppPage, createController },
 };
