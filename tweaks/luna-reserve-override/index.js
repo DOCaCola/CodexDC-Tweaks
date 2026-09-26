@@ -5,8 +5,8 @@ const { join } = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { configureReserveMode } = require("./reserve-mode.js");
 
-const STATE_KEY = "__codexdcUnlimitedModelSelection__";
-const QUEUE_KEY = Symbol.for("codexdc.unlimited-model-selection.queues");
+const STATE_KEY = "__codexdcLunaReserveOverride__";
+const QUEUE_KEY = Symbol.for("codexdc.luna-reserve-override.queues");
 
 // Discover the feature layer from the installed renderer, not a minified name
 // or a catalog response. Refuse an unsupported build rather than report success.

@@ -5,9 +5,9 @@ import { createContext, runInContext } from "node:vm";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { configureReserveMode } = require("../tweaks/unlimited-model-selection/reserve-mode.js");
+const { configureReserveMode } = require("../tweaks/luna-reserve-override/reserve-mode.js");
 const { findReserveLayer, isAppPage, createController } =
-  require("../tweaks/unlimited-model-selection/index.js").__test;
+  require("../tweaks/luna-reserve-override/index.js").__test;
 const layerId = "2458863263";
 const key = "__testReserveMode";
 
