@@ -1,8 +1,8 @@
 {
   "id": "local.unlimited-model-selection",
-  "name": "Unlimited Model Selection",
-  "version": "0.2.0",
-  "description": "Keeps model selection available after quota exhaustion by disabling forced Luna Reserve mode. Provider usage limits still apply.",
+  "name": "Luna Reserve Override",
+  "version": "0.2.1",
+  "description": "Prevents the app from forcing Luna Reserve when your quota runs out, keeping other models selectable. Provider usage limits still apply.",
   "scope": "main",
   "main": "index.js",
   "githubRepo": "DOCaCola/CodexDC-Tweaks",
