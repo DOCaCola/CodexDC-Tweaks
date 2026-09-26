@@ -9,11 +9,12 @@ Install and update them from the **Tweak Store** inside CodexDC.
 | Message Timestamps | Display message timestamps |
 | Restart Session Command | Add a command to restart the shared local backend |
 | Shell Display Fixes | Simplify displayed MSYS shell prefixes on Windows |
-| Luna Reserve Override | Prevent forced Luna Reserve selection after quota exhaustion |
+| Usage Lock Override | Keep model selection and chat input available after usage exhaustion |
 
-Luna Reserve Override disables the app's forced Luna Reserve mode and restores
-the original behavior when switched off. It applies to open and newly opened app
-windows without restarting the backend. Provider usage limits still apply.
+Usage Lock Override disables forced Luna Reserve selection and the shared Codex
+and Work usage lock on chat input. Switching it off restores the original behavior.
+It applies to open and newly opened app windows without restarting the backend.
+Provider usage limits still apply.
 
 Mac compatibility is pending real-app validation. The restart command affects
 the shared local backend, so finish active tasks before using it.

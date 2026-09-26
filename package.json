@@ -9,6 +9,7 @@
     "catalog": "node scripts/catalog.mjs"
   },
   "devDependencies": {
+    "jotai": "3.0.0",
     "tsx": "^4.20.0"
   }
 }
