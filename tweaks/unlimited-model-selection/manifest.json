@@ -1,0 +1,11 @@
+{
+  "id": "local.unlimited-model-selection",
+  "name": "Unlimited Model Selection",
+  "version": "0.1.0",
+  "description": "Keeps every model selectable. Codex groups models into versions and collapses the picker to the Luna Reserve version once your quota runs out; this removes that grouping.",
+  "scope": "main",
+  "main": "index.js",
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}

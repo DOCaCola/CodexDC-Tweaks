@@ -9,6 +9,7 @@ Install and update them from the **Tweak Store** inside CodexDC.
 | Message Timestamps | Display message timestamps |
 | Restart Session Command | Add a command to restart the shared local backend |
 | Shell Display Fixes | Simplify displayed MSYS shell prefixes on Windows |
+| Unlimited Model Selection | Keep every model selectable when the quota runs out |
 
 Mac compatibility is pending real-app validation. The restart command affects
 the shared local backend, so finish active tasks before using it.
