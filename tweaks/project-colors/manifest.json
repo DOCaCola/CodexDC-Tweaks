@@ -1,7 +1,7 @@
 {
   "id": "local.project-colors",
   "name": "Project Colors",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Color project folders and titles, with optional sidebar background tints. Choose colors from the project menu or tweak settings.",
   "scope": "renderer",
   "main": "index.js",

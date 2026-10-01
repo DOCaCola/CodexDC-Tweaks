@@ -35,27 +35,14 @@ ${PALETTE.map(([id, , value]) => `[${COLOR}="${id}"] { --codexdc-project-accent:
 [${COLOR}] [${TITLE}] [data-sidebar-project-drop-zone="project-icon"] svg {
   color: color-mix(in srgb, var(--codexdc-project-accent) 80%, var(--color-text));
 }
-.codexdc-project-color-menu {
-  display: flex; width: 100%; padding: 6px 8px; border: 0; border-radius: 4px;
-  background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer;
-}
-.codexdc-project-color-menu:hover, .codexdc-project-color-menu:focus-visible {
-  background: var(--color-background-panel);
-}
 .codexdc-project-color-dialog {
-  color: var(--color-text); background: var(--color-surface);
-  border: 1px solid var(--color-border); border-radius: 12px; padding: 20px;
-  max-width: 380px;
+  width: 100vw; height: 100dvh; max-width: none; max-height: none;
+  margin: 0; border: 0; padding: 0; background: transparent;
+  color: var(--color-text);
 }
-.codexdc-project-color-dialog::backdrop { background: rgb(0 0 0 / 35%); }
-.codexdc-project-color-dialog h2 { margin: 0 0 16px; font-size: 16px; }
-.codexdc-project-color-options { display: flex; flex-wrap: wrap; gap: 8px; }
-.codexdc-project-color-options button, .codexdc-project-color-dialog > button {
-  color: inherit; background: transparent; border: 1px solid var(--color-border);
-  border-radius: 6px; padding: 8px 12px; cursor: pointer;
-}
-.codexdc-project-color-dialog > button { margin-top: 16px; }
-.codexdc-project-color-options button[aria-pressed="true"] { outline: 2px solid var(--color-text); }
+.codexdc-project-color-dialog::backdrop { background: transparent; }
+.codexdc-project-color-panel { width: 400px; max-height: 92dvh; overflow-y: auto; }
+.codexdc-project-color-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .codexdc-project-color-swatch {
   display: inline-block; width: 12px; height: 12px; margin-inline-end: 6px; border-radius: 50%;
 }
@@ -179,35 +166,79 @@ function createProjectColors(api, doc) {
     dialog = doc.createElement("dialog");
     const current = dialog;
     current.className = "codexdc-project-color-dialog";
+    current.setAttribute("data-state", "open");
+    current.setAttribute("aria-modal", "true");
+    const overlay = doc.createElement("div");
+    overlay.className = "codex-dialog-overlay fixed inset-0 z-50 bg-(--color-dialog-overlay)";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.addEventListener("click", () => current.close());
+    const panel = doc.createElement("div");
+    panel.className = "codex-dialog codexdc-project-color-panel fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 outline-none bg-surface-elevated-secondary/90 text-default ring-[0.5px] ring-border shadow-lg backdrop-blur-xl rounded-3xl max-w-[92vw] p-6";
+    const heading = doc.createElement("div");
+    heading.className = "flex flex-col items-start gap-3 mb-6 pe-6";
     const title = doc.createElement("h2");
     title.id = "codexdc-project-color-title";
-    title.textContent = `Color for ${row.label}`;
+    title.className = "heading-dialog min-w-0 font-semibold text-default";
+    title.textContent = "Project color";
+    const subtitle = doc.createElement("p");
+    subtitle.id = "codexdc-project-color-description";
+    subtitle.className = "text-base leading-normal tracking-normal text-tertiary break-words";
+    subtitle.textContent = row.label;
+    heading.append(title, subtitle);
     current.setAttribute("aria-labelledby", title.id);
+    current.setAttribute("aria-describedby", subtitle.id);
+    // Reuse the app's Button component CSS from this project's native action.
+    // The module class is discovered from the live DOM, never a build hash.
+    const template = row.header.querySelector("button[aria-haspopup='menu']");
+    const buttonClass = [...template.classList].find(name => name.startsWith("_Button_"));
+    const innerClass = template.firstElementChild.className;
+    function nativeButton(label, color = "secondary", variant = "soft") {
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.className = buttonClass;
+      button.dataset.size = "md";
+      button.dataset.color = color;
+      button.dataset.variant = variant;
+      const inner = doc.createElement("span");
+      inner.className = innerClass;
+      inner.append(label);
+      button.append(inner);
+      return { button, inner };
+    }
     const options = doc.createElement("div");
     options.className = "codexdc-project-color-options";
     for (const [id, label, value] of [["auto", "Auto", null], ...PALETTE]) {
-      const button = doc.createElement("button");
-      button.type = "button";
-      button.setAttribute("aria-pressed", String((colors[row.key] || "auto") === id));
+      const selected = (colors[row.key] || "auto") === id;
+      const { button, inner } = nativeButton(label, selected ? "primary" : "secondary");
+      button.setAttribute("aria-pressed", String(selected));
+      button.toggleAttribute("data-selected", selected);
+      button.classList.add("w-full");
       if (value) {
         const swatch = doc.createElement("span");
         swatch.className = "codexdc-project-color-swatch";
         swatch.style.background = value;
         swatch.setAttribute("aria-hidden", "true");
-        button.append(swatch);
+        inner.prepend(swatch);
       }
-      button.append(label);
       button.addEventListener("click", () => {
         setColor(row.key, id);
         current.close();
       });
       options.append(button);
     }
-    const cancel = doc.createElement("button");
-    cancel.textContent = "Cancel";
-    cancel.type = "button";
+    const { button: cancel } = nativeButton("Cancel");
     cancel.addEventListener("click", () => current.close());
-    current.append(title, options, cancel);
+    const actions = doc.createElement("div");
+    actions.className = "flex items-center justify-end gap-2 mt-6";
+    actions.append(cancel);
+    const close = doc.createElement("button");
+    close.type = "button";
+    close.className = "no-drag cursor-interaction leading-none hover:bg-primary-ghost-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 text-text/80 rounded p-1 absolute top-4 right-4";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="m3 3 6 6M9 3 3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    close.addEventListener("click", () => current.close());
+    panel.append(heading, options, actions, close);
+    current.append(overlay, panel);
     current.addEventListener("close", () => {
       current.remove();
       if (dialog === current) dialog = null;
@@ -221,11 +252,30 @@ function createProjectColors(api, doc) {
     const row = pendingMenu;
     pendingMenu = null;
     win.clearTimeout(menuTimer);
-    const button = doc.createElement("button");
-    button.type = "button";
-    button.className = "codexdc-project-color-menu";
+    const template = menu.querySelector("[role='menuitem']:not([aria-haspopup]):not([aria-disabled='true'])");
+    const button = doc.createElement("div");
+    button.className = `${template.className} codexdc-project-color-menu`;
     button.setAttribute("role", "menuitem");
-    button.textContent = "Project color…";
+    button.tabIndex = -1;
+    button.setAttribute("data-orientation", "vertical");
+    const content = doc.createElement("div");
+    content.className = template.querySelector("[data-menu-row-content]").className;
+    content.setAttribute("data-menu-row-content", "true");
+    const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("width", "16");
+    icon.setAttribute("height", "16");
+    icon.setAttribute("viewBox", "0 0 16 16");
+    icon.setAttribute("class", "shrink-0 opacity-75 group-focus:opacity-100 group-hover:opacity-100");
+    icon.innerHTML = '<path d="M8 1.5a6.5 6.5 0 1 0 0 13h1a1.5 1.5 0 0 0 1.1-2.5c-.4-.5 0-1.3.7-1.3h.7a3 3 0 0 0 3-3A6.3 6.3 0 0 0 8 1.5Z" fill="none" stroke="currentColor"/><g fill="currentColor"><circle cx="4.5" cy="6" r="1"/><circle cx="7" cy="4" r="1"/><circle cx="10" cy="4.5" r="1"/><circle cx="12" cy="7" r="1"/></g>';
+    const label = doc.createElement("span");
+    label.className = "flex-1 min-w-0 truncate";
+    label.textContent = "Project color…";
+    content.append(icon, label);
+    button.append(content);
+    button.addEventListener("pointermove", event => {
+      if (event.pointerType === "mouse") button.focus();
+    });
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -240,6 +290,12 @@ function createProjectColors(api, doc) {
       const native = [...menu.querySelectorAll("[role='menuitem']")]
         .filter(item => item !== button && item.getAttribute("aria-disabled") !== "true");
       const active = doc.activeElement;
+      if (active === button && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        event.stopPropagation();
+        button.click();
+        return;
+      }
       let next;
       if (event.key === "End") next = button;
       else if (event.key === "ArrowDown" && active === native.at(-1)) next = button;
