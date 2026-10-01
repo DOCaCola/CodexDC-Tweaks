@@ -5,5 +5,8 @@ checkout and extracted into an independent collection. The host SDK and
 integration conventions derive from Bennett's MIT-licensed Codex++ project.
 Applicable upstream copyright and license are retained in LICENSE.
 
+Project Colors is an independent implementation inspired by the project coloring
+feature in [Bennett's UI Improvements](https://github.com/b-nnett/codex-plusplus-bennett-ui).
+
 Stable `local.*` tweak IDs are retained to preserve existing settings.
 This collection is not an official OpenAI product.

@@ -7,6 +7,7 @@ Install and update them from the **Tweak Store** inside CodexDC.
 | --- | --- |
 | Hide Get Plus Button | Hide the profile upgrade control |
 | Message Timestamps | Display message timestamps |
+| Project Colors | Color project folders and titles, with optional background tints |
 | Restart Session Command | Add a command to restart the shared local backend |
 | Shell Display Fixes | Simplify displayed MSYS shell prefixes on Windows |
 | Usage Lock Override | Keep model selection and chat input available after usage exhaustion |
@@ -16,6 +17,11 @@ and Work usage lock on chat input, and suppresses the usage-exhaustion notice an
 automatic reset offer. Switching it off restores the original behavior.
 It applies to open and newly opened app windows without restarting the backend.
 Provider usage limits still apply.
+
+Project Colors assigns automatic colors and offers **Project color…** in project
+menus. Choose Auto or one of seven colors there or in the tweak's settings.
+Selections follow project IDs across renames; projects with the same name keep
+separate choices. Background tints can be switched off independently.
 
 Mac compatibility is pending real-app validation. The restart command affects
 the shared local backend, so finish active tasks before using it.
