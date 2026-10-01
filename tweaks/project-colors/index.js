@@ -15,6 +15,7 @@ const PALETTE = [
   ["purple", "Purple", "var(--color-chart-purple)"],
   ["gray", "Gray", "var(--color-text-secondary)"],
 ];
+const OPTIONS = [["none", "None", null], ["auto", "Auto", null], ...PALETTE];
 const COLORS_KEY = "projectColors";
 const TINT_KEY = "tintBackgrounds";
 
@@ -82,7 +83,12 @@ function createProjectColors(api, doc) {
     row.header.removeAttribute(TITLE);
   }
   function paint(row) {
-    const color = colors[row.key] || automaticColor(row.key);
+    const selection = colors[row.key] ?? "none";
+    if (selection === "none") {
+      clear(row);
+      return;
+    }
+    const color = selection === "auto" ? automaticColor(row.key) : selection;
     if (row.group.getAttribute(COLOR) !== color) row.group.setAttribute(COLOR, color);
     row.group.toggleAttribute(TINT, tint);
     row.header.setAttribute(TITLE, "");
@@ -154,7 +160,7 @@ function createProjectColors(api, doc) {
   function setColor(key, color) {
     // Read at the time of the edit so other windows' selections are preserved.
     colors = { ...api.storage.get(COLORS_KEY, {}) };
-    if (color === "auto") delete colors[key];
+    if (color === "none") delete colors[key];
     else colors[key] = color;
     api.storage.set(COLORS_KEY, colors);
     for (const row of rows.values()) paint(row);
@@ -207,8 +213,8 @@ function createProjectColors(api, doc) {
     }
     const options = doc.createElement("div");
     options.className = "codexdc-project-color-options";
-    for (const [id, label, value] of [["auto", "Auto", null], ...PALETTE]) {
-      const selected = (colors[row.key] || "auto") === id;
+    for (const [id, label, value] of OPTIONS) {
+      const selected = (colors[row.key] ?? "none") === id;
       const { button, inner } = nativeButton(label, selected ? "primary" : "secondary");
       button.setAttribute("aria-pressed", String(selected));
       button.toggleAttribute("data-selected", selected);
@@ -381,13 +387,13 @@ function createProjectColors(api, doc) {
         label.title = row.header.getAttribute("data-app-action-sidebar-project-id");
         const select = doc.createElement("select");
         select.setAttribute("aria-label", `Color for ${row.label}`);
-        for (const [id, name] of [["auto", "Auto"], ...PALETTE]) {
+        for (const [id, name] of OPTIONS) {
           const option = doc.createElement("option");
           option.value = id;
           option.textContent = name;
           select.append(option);
         }
-        select.value = colors[row.key] || "auto";
+        select.value = colors[row.key] ?? "none";
         select.addEventListener("change", () => setColor(row.key, select.value));
         label.append(select);
         root.append(label);

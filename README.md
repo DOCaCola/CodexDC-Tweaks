@@ -18,8 +18,8 @@ automatic reset offer. Switching it off restores the original behavior.
 It applies to open and newly opened app windows without restarting the backend.
 Provider usage limits still apply.
 
-Project Colors assigns automatic colors and offers **Project color…** in project
-menus. Choose Auto or one of seven colors there or in the tweak's settings.
+Project Colors keeps projects uncolored by default and offers **Project color…**
+in project menus. Choose None, Auto, or one of seven colors there or in the tweak's settings.
 Selections follow project IDs across renames; projects with the same name keep
 separate choices. Background tints can be switched off independently.
 

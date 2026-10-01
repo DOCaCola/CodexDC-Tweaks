@@ -72,9 +72,13 @@ test("project colors persist by identity across equal labels, renames and remoun
     h.sidebar.append(second.group);
     await h.settle();
     const root = h.settings();
+    assert.equal(h.first.group.hasAttribute(colorAttr), false);
+    assert.equal(h.first.group.hasAttribute("data-codexdc-project-tint"), false);
+    assert.equal(h.first.header.hasAttribute(titleAttr), false);
+    assert.equal(root.querySelector("select")!.value, "none");
     h.selectColor(root, "purple");
     assert.equal(h.first.group.getAttribute(colorAttr), "purple");
-    assert.equal(second.group.getAttribute(colorAttr), automaticColor(key("/work/two")));
+    assert.equal(second.group.hasAttribute(colorAttr), false);
     h.first.header.setAttribute("data-app-action-sidebar-project-label", "Renamed");
     await h.settle();
     assert.equal(h.first.group.getAttribute(colorAttr), "purple");
@@ -92,11 +96,11 @@ test("project colors persist by identity across equal labels, renames and remoun
     await h.settle();
     h.selectColor(root, "red", 3);
     assert.equal(remote.group.getAttribute(colorAttr), "red");
-    assert.equal(local.group.getAttribute(colorAttr), automaticColor(key("shared-id")));
+    assert.equal(local.group.hasAttribute(colorAttr), false);
   } finally { h.cleanup(); }
 });
 
-test("automatic reset, background preference and cross-window storage preserve other projects", async () => {
+test("explicit Auto, None, background preference and cross-window storage preserve other projects", async () => {
   const h = setup();
   try {
     await h.settle();
@@ -105,7 +109,14 @@ test("automatic reset, background preference and cross-window storage preserve o
     h.selectColor(root, "blue");
     assert.deepEqual(h.stored.projectColors, { [key("/other")]: "green", [key("/work/one")]: "blue" });
     h.selectColor(root, "auto");
+    assert.deepEqual(h.stored.projectColors, { [key("/other")]: "green", [key("/work/one")]: "auto" });
+    assert.equal(h.first.group.getAttribute(colorAttr), automaticColor(key("/work/one")));
+    h.selectColor(root, "none");
     assert.deepEqual(h.stored.projectColors, { [key("/other")]: "green" });
+    assert.equal(h.first.group.hasAttribute(colorAttr), false);
+    assert.equal(h.first.group.hasAttribute("data-codexdc-project-tint"), false);
+    assert.equal(h.first.header.hasAttribute(titleAttr), false);
+    h.selectColor(root, "auto");
     const checkbox = root.querySelector("input")!;
     checkbox.checked = false;
     checkbox.dispatchEvent(new h.dom.window.Event("change"));
@@ -119,7 +130,7 @@ test("automatic reset, background preference and cross-window storage preserve o
 });
 
 test("animation churn and conversation inserts schedule no color work or layout reads", async () => {
-  const h = setup();
+  const h = setup({ projectColors: { [key("/work/one")]: "auto" } });
   try {
     await h.settle();
     const initial = h.scheduled();
@@ -197,6 +208,8 @@ test("project menu opens an accessible color dialog and native menu closes throu
     assert.equal(dialog.getAttribute("aria-describedby"), "codexdc-project-color-description");
     assert.equal(dialog.querySelectorAll(".codex-dialog-overlay").length, 1);
     assert.equal(dialog.querySelectorAll(".codex-dialog").length, 1);
+    const none = [...dialog.querySelectorAll("button")].find(button => button.textContent === "None")!;
+    assert.equal(none.getAttribute("aria-pressed"), "true");
     const green = [...dialog.querySelectorAll("button")].find(button => button.textContent === "Green")!;
     assert.equal(green.classList.contains("_Button_native_1"), true);
     assert.equal(green.getAttribute("data-variant"), "soft");
