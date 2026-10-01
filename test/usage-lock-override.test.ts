@@ -7,13 +7,14 @@ import { atom, createStore } from "jotai/vanilla";
 
 const require = createRequire(import.meta.url);
 const { configureUsageLocks } = require("../tweaks/usage-lock-override/usage-locks.js");
-const { findReserveLayer, findUsageGate, findUsagePresentation, isAppPage, createController } =
+const { findReserveLayer, findSidebarAlertLayers, findUsageGate, findUsagePresentation, isAppPage, createController } =
   require("../tweaks/usage-lock-override/index.js").__test;
 const layerId = "2458863263";
+const sidebarAlertLayers = ["3605558075", "1385051397", "2673725514"];
 const key = "__testUsageLocks";
 const usageGate = { module: "/assets/test.js", selector: "gate", initialize: "initialize" };
 const usagePresentation = { module: "/assets/shared.js", selector: "usage", initialize: "initialize" };
-const configuration = { layer: layerId, usageGate, usagePresentation };
+const configuration = { layer: layerId, sidebarAlertLayers, usageGate, usagePresentation };
 
 function usageResult(bannerType = "usage_limit_reached", allowed = false) {
   return {
@@ -59,7 +60,7 @@ function usageScope() {
 
 function featureClient() {
   const events = new EventEmitter();
-  const values = { reserve_enabled: true, other_setting: 17 };
+  const values = { reserve_enabled: true, enabled: true, other_setting: 17 };
   const layer = {
     name: layerId,
     get(name: string, fallback: unknown) { return values[name as keyof typeof values] ?? fallback; },
@@ -110,6 +111,14 @@ test("discovers the reserve setting independently of minified symbols and reject
   assert.equal(findReserveLayer(source), layerId);
   assert.throws(() => findReserveLayer("const versions=[]"), /Unsupported/);
   assert.throws(() => findReserveLayer(source + source.replace(layerId, "other")), /Unsupported/);
+});
+
+test("discovers personal and workspace sidebar alert layers without minified names", () => {
+  const source = "renamed={personal:`3605558075`,workspace_owner:`1385051397`,workspace_member:`2673725514`},"
+    + "defaults={enabled:!1,showWithCredits:!1,exposureThresholdPercent:20,remainingThresholdPercent:20}";
+  assert.deepEqual(findSidebarAlertLayers(source), sidebarAlertLayers);
+  assert.throws(() => findSidebarAlertLayers(""), /Unsupported/);
+  assert.throws(() => findSidebarAlertLayers(source + source), /expected one/);
 });
 
 test("discovers the exported shared usage gate and rejects missing or ambiguous gates", () => {
@@ -181,6 +190,41 @@ test("preserves model-specific notices, fallback metadata, and upsells before ex
     p.usage.store.set(p.usage.rawUsage, result as ReturnType<typeof usageResult>);
     assert.equal(p.usage.store.get(p.usage.presentation), result);
   }
+});
+
+test("hides sidebar rate-limit and credit cards before exhaustion and restores the latest warnings", async () => {
+  const p = page(featureClient().client);
+  const { store, rawUsage, presentation } = p.usage;
+  const observed: unknown[] = [];
+  const unsubscribe = store.sub(presentation, () => observed.push(store.get(presentation)));
+  function warningResult(bannerType: string) {
+    const result = usageResult("usage_low", true);
+    const credits = { balance: "25", has_credits: true };
+    const warning = { banner_type: bannerType, title: "Usage remaining", description: "Resets at 5:45 PM",
+      ctas: [{ action: "buy_credits" }, { action: "upgrade_plan" }] };
+    return { ...result, data: { ...result.data, credits, model_picker_upsell: { blocked_model_slug: "limited-model" },
+      rate_limit_warning: warning, sidebar_usage_warnings: { default: warning, by_model: { "limited-model": warning } } } };
+  }
+  const original = warningResult("rate_limit");
+  store.set(rawUsage, original);
+  await p.configure();
+  for (const latest of [original, warningResult("credits")]) {
+    store.set(rawUsage, latest);
+    const visible = store.get(presentation);
+    assert.equal(visible.data.rate_limit_warning, undefined);
+    assert.equal(visible.data.sidebar_usage_warnings.default, null);
+    assert.equal(visible.data.sidebar_usage_warnings.by_model, undefined);
+    assert.equal(visible.data.rate_limit, latest.data.rate_limit);
+    assert.equal(visible.data.credits, latest.data.credits);
+    assert.equal(visible.data.rate_limit_upsell, latest.data.rate_limit_upsell);
+    assert.equal(visible.data.model_picker_upsell, latest.data.model_picker_upsell);
+    assert.equal(store.get(rawUsage), latest);
+    assert.equal(store.get(presentation), visible);
+  }
+  assert.equal(observed.length >= 2, true);
+  await p.configure(false);
+  assert.equal(store.get(presentation), store.get(rawUsage));
+  unsubscribe();
 });
 
 test("suppresses upsells in newly resolved app scopes and restores them on stop", async () => {
@@ -271,6 +315,14 @@ test("enabling updates subscribed selectors immediately and restores current ser
   assert.equal((await p.configure()).status, "active");
   assert.equal(reserveActive, false);
   assert.equal(values.reserve_enabled, true);
+  const cachedAlerts = sidebarAlertLayers.map(name => client.getLayer(name));
+  for (const alertLayer of cachedAlerts) {
+    assert.equal(alertLayer.get("enabled", true), false);
+    assert.equal(alertLayer.get("reserve_enabled", false), true);
+    assert.equal(alertLayer.get("other_setting", 0), 17);
+  }
+  assert.equal(values.enabled, true);
+  assert.equal(client.getLayer(layerId).get("enabled", false), true);
   assert.equal(client.getLayer("unrelated"), layer);
   assert.equal(client.getLayer(layerId).get("other_setting", 0), 17);
   assert.equal(calls.some((call) => call[1] === options), true);
@@ -285,6 +337,7 @@ test("enabling updates subscribed selectors immediately and restores current ser
   assert.equal(client.getLayer, original);
   assert.equal(reserveActive, true);
   assert.equal(cached.get("reserve_enabled", false), true);
+  for (const alertLayer of cachedAlerts) assert.equal(alertLayer.get("enabled", false), true);
   assert.equal(p.timers.size, 0);
 });
 

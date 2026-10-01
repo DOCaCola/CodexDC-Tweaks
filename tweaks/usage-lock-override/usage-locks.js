@@ -2,7 +2,7 @@
 
 // Serialized into the app's main JavaScript world by the Owl compatibility API.
 // Keep this function self-contained.
-async function configureUsageLocks({ key, owner, layer, usageGate, usagePresentation, enabled }, loadModule = (url) => import(url)) {
+async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usageGate, usagePresentation, enabled }, loadModule = (url) => import(url)) {
   if (!/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(location.href)) {
     return { status: "skipped" };
   }
@@ -79,19 +79,28 @@ async function configureUsageLocks({ key, owner, layer, usageGate, usagePresenta
     publish(atom, store);
   }
 
-  function suppressUsageUpsell() {
+  function suppressUsageNotices() {
     const results = new WeakMap();
     return (result) => {
       const data = result.data;
-      // This field drives both the exhaustion notice and automatic reset offer.
-      // Keep the actual quota, polling state, and image-specific limits intact.
-      if (data?.rate_limit?.allowed !== false || data.rate_limit_upsell == null
-        || data.rate_limit_upsell.banner_type === "image_generation_limit_reached"
-        || data.rate_limit_upsell.model_slug != null
-        || data.rate_limit_upsell.blocked_model_slug != null) return result;
+      if (data == null) return result;
+      // Hide sidebar warning presentations at any usage level, alongside the
+      // exhausted-usage modal. Keep quotas, credits, polling and model upsells.
+      const hideUpsell = data.rate_limit?.allowed === false && data.rate_limit_upsell != null
+        && data.rate_limit_upsell.banner_type !== "image_generation_limit_reached"
+        && data.rate_limit_upsell.model_slug == null
+        && data.rate_limit_upsell.blocked_model_slug == null;
+      if (!hideUpsell && data.rate_limit_warning == null && data.sidebar_usage_warnings == null) return result;
       let wrapped = results.get(result);
       if (!wrapped) {
-        const presentation = { ...data, rate_limit_upsell: undefined };
+        const presentation = {
+          ...data,
+          ...(hideUpsell ? { rate_limit_upsell: undefined } : {}),
+          ...(data.rate_limit_warning != null ? { rate_limit_warning: undefined } : {}),
+          // An empty presentation keeps the current sidebar renderer from
+          // falling back to an older warning implementation.
+          ...(data.sidebar_usage_warnings != null ? { sidebar_usage_warnings: { default: null } } : {}),
+        };
         wrapped = new Proxy(result, {
           get(target, property, receiver) {
             return property === "data" ? presentation : Reflect.get(target, property, receiver);
@@ -106,7 +115,7 @@ async function configureUsageLocks({ key, owner, layer, usageGate, usagePresenta
   for (const [index, selector] of selectors.entries()) {
     const originalResolve = selector.resolve;
     const atoms = index === 0 ? usageAtoms : presentationAtoms;
-    const transform = index === 0 ? () => false : suppressUsageUpsell();
+    const transform = index === 0 ? () => false : suppressUsageNotices();
     function resolve(node, chain) {
       const atom = Reflect.apply(originalResolve, this, [node, chain]);
       if (!stopped) patchAtom(atom, chain.get(selector.scope.id).store, atoms, transform);
@@ -154,21 +163,30 @@ async function configureUsageLocks({ key, owner, layer, usageGate, usagePresenta
     }
     const original = client.getLayer;
     const descriptor = Object.getOwnPropertyDescriptor(client, "getLayer");
-    const wrappedLayers = new WeakMap();
+    const overriddenParameters = new Map([
+      [layer, "reserve_enabled"],
+      ...sidebarAlertLayers.map((name) => [name, "enabled"]),
+    ]);
+    const wrappedLayers = new Map();
     let enabled = true;
     function getLayer(name, ...args) {
       const value = Reflect.apply(original, this, [name, ...args]);
-      if (!enabled || name !== layer) return value;
-      let wrapped = wrappedLayers.get(value);
+      if (!enabled || !overriddenParameters.has(name)) return value;
+      let cache = wrappedLayers.get(name);
+      if (!cache) {
+        cache = new WeakMap();
+        wrappedLayers.set(name, cache);
+      }
+      let wrapped = cache.get(value);
       if (!wrapped) {
         wrapped = {
           ...value,
           get(parameter, ...args) {
-            if (enabled && parameter === "reserve_enabled") return false;
+            if (enabled && parameter === overriddenParameters.get(name)) return false;
             return Reflect.apply(value.get, value, [parameter, ...args]);
           },
         };
-        wrappedLayers.set(value, wrapped);
+        cache.set(value, wrapped);
       }
       return wrapped;
     }
@@ -182,7 +200,7 @@ async function configureUsageLocks({ key, owner, layer, usageGate, usagePresenta
       notify(client);
     });
     notify(client);
-    console.info("[codexdc] Forced Luna Reserve selection disabled");
+    console.info("[codexdc] Forced Luna Reserve selection and sidebar usage alerts disabled");
   }
 
   function refresh() {

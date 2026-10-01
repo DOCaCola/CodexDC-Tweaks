@@ -21,6 +21,16 @@ function findReserveLayer(source) {
   return [...layers][0];
 }
 
+function findSidebarAlertLayers(source) {
+  const matches = [...source.matchAll(
+    /[$\w]+=\{personal:[`'"]([^`'"]+)[`'"],workspace_owner:[`'"]([^`'"]+)[`'"],workspace_member:[`'"]([^`'"]+)[`'"]\},[$\w]+=\{enabled:!1,showWithCredits:!1,exposureThresholdPercent:[\d.]+,remainingThresholdPercent:/g,
+  )];
+  if (matches.length !== 1) {
+    throw new Error("Unsupported Codex build: expected one sidebar usage-alert configuration");
+  }
+  return matches[0].slice(1);
+}
+
 function findUsageGate(source) {
   const declarations = [...source.matchAll(
     /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+\}\)=>\{/g,
@@ -81,6 +91,7 @@ function readConfiguration(appPath) {
   const shared = bundle("app-shared-");
   return {
     layer: findReserveLayer(initial.source),
+    sidebarAlertLayers: findSidebarAlertLayers(initial.source),
     usageGate: { module: `/assets/${primary.name}`, ...findUsageGate(primary.source) },
     usagePresentation: { module: `/assets/${shared.name}`, ...findUsagePresentation(shared.source) },
   };
@@ -159,5 +170,5 @@ function stop() {
 module.exports = {
   start,
   stop,
-  __test: { findReserveLayer, findUsageGate, findUsagePresentation, readConfiguration, isAppPage, createController },
+  __test: { findReserveLayer, findSidebarAlertLayers, findUsageGate, findUsagePresentation, readConfiguration, isAppPage, createController },
 };
