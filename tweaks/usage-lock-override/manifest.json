@@ -1,8 +1,8 @@
 {
   "id": "local.usage-lock-override",
   "name": "Usage Lock Override",
-  "version": "0.3.0",
-  "description": "Keeps model selection and chat input available when Codex or Work usage runs out, and prevents forced Luna Reserve selection. Provider usage limits still apply.",
+  "version": "0.4.0",
+  "description": "Keeps model selection and chat input available when Codex or Work usage runs out, hides the usage-exhaustion upsell, and prevents forced Luna Reserve selection. Provider usage limits still apply.",
   "scope": "main",
   "main": "index.js",
   "githubRepo": "DOCaCola/CodexDC-Tweaks",

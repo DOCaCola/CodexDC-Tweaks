@@ -36,17 +36,37 @@ function findUsageGate(source) {
   if (declarations.length !== 1) {
     throw new Error("Unsupported Codex build: expected one shared usage-block selector");
   }
-  const declaration = declarations[0];
+  return exportedSelector(source, declarations[0], "usage selector");
+}
+
+function exportedSelector(source, declaration, label) {
   const prefix = source.slice(0, declaration.index);
   const initializer = [...prefix.matchAll(/function ([$\w]+)\(\)\{return\(/g)].at(-1)?.[1];
   const exports = source.slice(source.lastIndexOf("export{") + 7, source.lastIndexOf("};"))
     .split(",").map((entry) => entry.split(" as "));
   function exported(name) {
     const matches = exports.filter(([local]) => local === name);
-    if (matches.length !== 1) throw new Error("Unsupported Codex build: usage selector export missing");
+    if (matches.length !== 1) throw new Error(`Unsupported Codex build: ${label} export missing`);
     return matches[0][1] ?? matches[0][0];
   }
   return { selector: exported(declaration[1]), initialize: exported(initializer) };
+}
+
+function findUsagePresentation(source) {
+  const declarations = [...source.matchAll(
+    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
+  )].filter((match) => {
+    const end = source.indexOf("refetchIntervalInBackground:", match.index);
+    const body = source.slice(match.index, end);
+    return end !== -1 && body.length < 7000
+      && body.includes("`base_interval_ms`")
+      && body.includes("`usage_scaling_multiplier`")
+      && body.includes(".rate_limit?.allowed===!1");
+  });
+  if (declarations.length !== 1) {
+    throw new Error("Unsupported Codex build: expected one shared usage presentation query");
+  }
+  return exportedSelector(source, declarations[0], "usage presentation");
 }
 
 function readConfiguration(appPath) {
@@ -58,9 +78,11 @@ function readConfiguration(appPath) {
   }
   const initial = bundle("app-initial-");
   const primary = bundle("app-primary-");
+  const shared = bundle("app-shared-");
   return {
     layer: findReserveLayer(initial.source),
     usageGate: { module: `/assets/${primary.name}`, ...findUsageGate(primary.source) },
+    usagePresentation: { module: `/assets/${shared.name}`, ...findUsagePresentation(shared.source) },
   };
 }
 
@@ -137,5 +159,5 @@ function stop() {
 module.exports = {
   start,
   stop,
-  __test: { findReserveLayer, findUsageGate, readConfiguration, isAppPage, createController },
+  __test: { findReserveLayer, findUsageGate, findUsagePresentation, readConfiguration, isAppPage, createController },
 };

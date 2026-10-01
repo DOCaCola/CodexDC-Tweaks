@@ -2,7 +2,7 @@
 
 // Serialized into the app's main JavaScript world by the Owl compatibility API.
 // Keep this function self-contained.
-async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, loadModule = (url) => import(url)) {
+async function configureUsageLocks({ key, owner, layer, usageGate, usagePresentation, enabled }, loadModule = (url) => import(url)) {
   if (!/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(location.href)) {
     return { status: "skipped" };
   }
@@ -17,14 +17,19 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
   if (existing?.owner === owner) return existing.status();
   existing?.stop();
 
-  const module = await loadModule(usageGate.module);
-  module[usageGate.initialize]();
-  const selector = module[usageGate.selector];
-  if (typeof selector?.resolve !== "function" || selector.scope?.__scopeBrand !== "AppScope") {
-    throw new Error("Unsupported Codex usage selector");
+  const selectors = [];
+  for (const configuration of [usageGate, usagePresentation]) {
+    const module = await loadModule(configuration.module);
+    module[configuration.initialize]();
+    const selector = module[configuration.selector];
+    if (typeof selector?.resolve !== "function" || selector.scope?.__scopeBrand !== "AppScope") {
+      throw new Error("Unsupported Codex usage selector");
+    }
+    selectors.push(selector);
   }
-  const originalResolve = selector.resolve;
   const usageAtoms = new Map();
+  const presentationAtoms = new Map();
+  const resolvers = new Map();
   const clients = new Map();
   let stopped = false;
   let failure;
@@ -52,8 +57,8 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
     }
   }
 
-  function patchUsageAtom(atom, store) {
-    if (usageAtoms.has(atom)) return;
+  function patchAtom(atom, store, atoms, transform) {
+    if (atoms.has(atom)) return;
     if (typeof atom.read !== "function" || "init" in atom || "write" in atom) {
       throw new Error("Unsupported Codex usage-block atom");
     }
@@ -62,11 +67,11 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
     store.get(atom);
     let active = true;
     function read(...args) {
-      const blocked = Reflect.apply(originalRead, this, args);
-      return active ? false : blocked;
+      const value = Reflect.apply(originalRead, this, args);
+      return active ? transform(value) : value;
     }
     atom.read = read;
-    usageAtoms.set(atom, () => {
+    atoms.set(atom, () => {
       active = false;
       if (atom.read === read) atom.read = originalRead;
       publish(atom, store);
@@ -74,12 +79,44 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
     publish(atom, store);
   }
 
-  function resolve(node, chain) {
-    const atom = Reflect.apply(originalResolve, this, [node, chain]);
-    if (!stopped) patchUsageAtom(atom, chain.get(selector.scope.id).store);
-    return atom;
+  function suppressUsageUpsell() {
+    const results = new WeakMap();
+    return (result) => {
+      const data = result.data;
+      // This field drives both the exhaustion notice and automatic reset offer.
+      // Keep the actual quota, polling state, and image-specific limits intact.
+      if (data?.rate_limit?.allowed !== false || data.rate_limit_upsell == null
+        || data.rate_limit_upsell.banner_type === "image_generation_limit_reached"
+        || data.rate_limit_upsell.model_slug != null
+        || data.rate_limit_upsell.blocked_model_slug != null) return result;
+      let wrapped = results.get(result);
+      if (!wrapped) {
+        const presentation = { ...data, rate_limit_upsell: undefined };
+        wrapped = new Proxy(result, {
+          get(target, property, receiver) {
+            return property === "data" ? presentation : Reflect.get(target, property, receiver);
+          },
+        });
+        results.set(result, wrapped);
+      }
+      return wrapped;
+    };
   }
-  selector.resolve = resolve;
+
+  for (const [index, selector] of selectors.entries()) {
+    const originalResolve = selector.resolve;
+    const atoms = index === 0 ? usageAtoms : presentationAtoms;
+    const transform = index === 0 ? () => false : suppressUsageUpsell();
+    function resolve(node, chain) {
+      const atom = Reflect.apply(originalResolve, this, [node, chain]);
+      if (!stopped) patchAtom(atom, chain.get(selector.scope.id).store, atoms, transform);
+      return atom;
+    }
+    selector.resolve = resolve;
+    resolvers.set(selector, () => {
+      if (selector.resolve === resolve) selector.resolve = originalResolve;
+    });
+  }
 
   function refreshUsageScopes() {
     // Existing readers already hold atoms. Find their AppScope provider through
@@ -91,10 +128,9 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
         visited.add(fiber);
         const chain = fiber.memoizedProps?.value;
         if (!(chain instanceof Map)) continue;
-        const node = chain.get(selector.scope.id);
-        if (node) {
-          selector.resolve(node, chain);
-          return;
+        for (const selector of selectors) {
+          const node = chain.get(selector.scope.id);
+          if (node) selector.resolve(node, chain);
         }
       }
     }
@@ -151,7 +187,7 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
 
   function refresh() {
     if (stopped) return;
-    if (!usageAtoms.size) refreshUsageScopes();
+    if (!usageAtoms.size || !presentationAtoms.size) refreshUsageScopes();
     const registry = globalThis.__STATSIG__;
     const current = new Set(Object.values(registry?.instances ?? {}));
     if (registry?.firstInstance) current.add(registry.firstInstance);
@@ -172,20 +208,23 @@ async function configureUsageLocks({ key, owner, layer, usageGate, enabled }, lo
   const state = {
     owner,
     status: () => ({
-      status: failure ? "failed" : stopped ? "stopped" : clients.size && usageAtoms.size ? "active" : "waiting",
+      status: failure ? "failed" : stopped ? "stopped" : clients.size && usageAtoms.size && presentationAtoms.size ? "active" : "waiting",
       clients: clients.size,
       usageAtoms: usageAtoms.size,
+      presentationAtoms: presentationAtoms.size,
       layer,
       ...(failure ? { error: failure } : {}),
     }),
     stop() {
       stopped = true;
       clearInterval(timer);
-      if (selector.resolve === resolve) selector.resolve = originalResolve;
+      for (const restore of resolvers.values()) restore();
       for (const restore of clients.values()) restore();
       clients.clear();
       for (const restore of usageAtoms.values()) restore();
       usageAtoms.clear();
+      for (const restore of presentationAtoms.values()) restore();
+      presentationAtoms.clear();
     },
   };
   globalThis[key] = state;

@@ -12,7 +12,8 @@ Install and update them from the **Tweak Store** inside CodexDC.
 | Usage Lock Override | Keep model selection and chat input available after usage exhaustion |
 
 Usage Lock Override disables forced Luna Reserve selection and the shared Codex
-and Work usage lock on chat input. Switching it off restores the original behavior.
+and Work usage lock on chat input, and suppresses the usage-exhaustion notice and
+automatic reset offer. Switching it off restores the original behavior.
 It applies to open and newly opened app windows without restarting the backend.
 Provider usage limits still apply.
 

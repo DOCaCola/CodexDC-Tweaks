@@ -7,12 +7,30 @@ import { atom, createStore } from "jotai/vanilla";
 
 const require = createRequire(import.meta.url);
 const { configureUsageLocks } = require("../tweaks/usage-lock-override/usage-locks.js");
-const { findReserveLayer, findUsageGate, isAppPage, createController } =
+const { findReserveLayer, findUsageGate, findUsagePresentation, isAppPage, createController } =
   require("../tweaks/usage-lock-override/index.js").__test;
 const layerId = "2458863263";
 const key = "__testUsageLocks";
 const usageGate = { module: "/assets/test.js", selector: "gate", initialize: "initialize" };
-const configuration = { layer: layerId, usageGate };
+const usagePresentation = { module: "/assets/shared.js", selector: "usage", initialize: "initialize" };
+const configuration = { layer: layerId, usageGate, usagePresentation };
+
+function usageResult(bannerType = "usage_limit_reached", allowed = false) {
+  return {
+    data: {
+      account_id: "account",
+      rate_limit: { allowed, primary_window: { used_percent: 100, reset_at: 123 } },
+      rate_limit_upsell: {
+        banner_type: bannerType,
+        title: "You’re out of Codex and Work usage",
+        description: "Your rate limit resets on {time}. Upgrade or use a reset now.",
+        ctas: [{ action: "buy_reset", price: { amount_minor_units: 100, currency: "USD" } }],
+      },
+    },
+    isFetching: false,
+    refetch() {},
+  };
+}
 
 function usageScope() {
   const scope = { __scopeBrand: "AppScope", id: Symbol() };
@@ -27,9 +45,16 @@ function usageScope() {
       return node.cachedBindings.get(selector);
     },
   };
-  const node = { token: scope, store, cachedBindings: new Map([[selector, blocked]]) };
+  const rawUsage = atom(usageResult());
+  const presentation = atom((get) => get(rawUsage));
+  const presentationSelector = { ...selector };
+  presentationSelector.resolve = (node) => node.cachedBindings.get(presentationSelector);
+  const node = { token: scope, store, cachedBindings: new Map([
+    [selector, blocked], [presentationSelector, presentation],
+  ]) };
   const chain = new Map([[scope.id, node]]);
-  return { selector, node, chain, store, exhausted, readOnly, blocked, disabled };
+  return { selector, node, chain, store, exhausted, readOnly, blocked, disabled,
+    rawUsage, presentation, presentationSelector };
 }
 
 function featureClient() {
@@ -65,7 +90,7 @@ function page(client?: ReturnType<typeof featureClient>["client"], url = "app://
     document: { body: { querySelectorAll: () => [
       { __reactFiber$test: { memoizedProps: { value: usage.chain } } },
     ] } },
-    __loadModule: async () => ({ initialize() {}, gate: usage.selector }),
+    __loadModule: async () => ({ initialize() {}, gate: usage.selector, usage: usage.presentationSelector }),
     __STATSIG__: { instances: client ? { local: client } : {}, firstInstance: client },
     console: { info() {}, error: (...args: unknown[]) => errors.push(args) },
     setInterval(fn: () => void) { timers.set(++nextTimer, fn); return nextTimer; },
@@ -97,6 +122,77 @@ test("discovers the exported shared usage gate and rejects missing or ambiguous 
   assert.throws(() => findUsageGate("export{};"), /expected one/);
   assert.throws(() => findUsageGate(source + source), /expected one/);
   assert.throws(() => findUsageGate(source.replace("lock as gate", "other as gate")), /export missing/);
+});
+
+test("discovers the shared usage presentation query without relying on minified symbols", () => {
+  const source = "var query;function init(){return(init=once((()=>{"
+    + "query=querySignal(scope,({get:g,scope:s,queryClient:c})=>{"
+    + "let interval=g(config).get(`base_interval_ms`,30000),scale=g(config).get(`usage_scaling_multiplier`,1);"
+    + "return{queryKey:key,refetchInterval:r=>r.state.data?.rate_limit?.allowed===!1?5000:interval,"
+    + "refetchIntervalInBackground:!0}})})))()}export{query as usage,init as setup};";
+  assert.deepEqual(findUsagePresentation(source), { selector: "usage", initialize: "setup" });
+  assert.throws(() => findUsagePresentation("export{};"), /expected one/);
+  assert.throws(() => findUsagePresentation(source + source), /expected one/);
+  assert.throws(() => findUsagePresentation(source.replace("query as usage", "other as usage")), /export missing/);
+});
+
+test("suppresses exhausted usage upsells for mounted readers and restores the latest server result", async () => {
+  const p = page(featureClient().client);
+  const { store, presentation, presentationSelector, rawUsage } = p.usage;
+  const originalRead = presentation.read, originalResolve = presentationSelector.resolve;
+  const observed: unknown[] = [];
+  const unsubscribe = store.sub(presentation, () => observed.push(store.get(presentation)));
+  const raw = store.get(rawUsage);
+  await p.configure();
+  const filtered = store.get(presentation);
+  assert.equal(filtered.data.rate_limit_upsell, undefined);
+  assert.equal(filtered.data.rate_limit, raw.data.rate_limit);
+  assert.equal(filtered.refetch, raw.refetch);
+  assert.equal(filtered.isFetching, false);
+  assert.equal(store.get(presentation), filtered);
+  assert.equal(store.get(rawUsage), raw);
+  assert.equal(observed.length, 1);
+  assert.equal("init" in presentation, false);
+  assert.equal("write" in presentation, false);
+
+  const refresh = { ...usageResult(), isFetching: true };
+  store.set(rawUsage, refresh);
+  assert.equal(store.get(presentation).data.rate_limit_upsell, undefined);
+  assert.equal(store.get(presentation).isFetching, true);
+  await p.configure(false);
+  assert.equal(store.get(presentation), refresh);
+  assert.equal(presentation.read, originalRead);
+  assert.equal(presentationSelector.resolve, originalResolve);
+  unsubscribe();
+});
+
+test("preserves model-specific notices, fallback metadata, and upsells before exhaustion", async () => {
+  const p = page(featureClient().client);
+  await p.configure();
+  const selectedModel = usageResult("selected_model_limit_reached");
+  const fallback = usageResult("selected_model_limit_reached");
+  Object.assign(selectedModel.data.rate_limit_upsell, { model_slug: "limited-model" });
+  Object.assign(fallback.data.rate_limit_upsell, {
+    blocked_model_slug: "limited-model", fallback_model_slugs: ["available-model"],
+  });
+  for (const result of [usageResult("image_generation_limit_reached"), usageResult("usage_low", true),
+    selectedModel, fallback,
+    { ...usageResult(), data: undefined }]) {
+    p.usage.store.set(p.usage.rawUsage, result as ReturnType<typeof usageResult>);
+    assert.equal(p.usage.store.get(p.usage.presentation), result);
+  }
+});
+
+test("suppresses upsells in newly resolved app scopes and restores them on stop", async () => {
+  const p = page(featureClient().client);
+  await p.configure();
+  const next = usageScope();
+  next.node.cachedBindings.set(p.usage.presentationSelector, next.presentation);
+  const chain = new Map([[p.usage.presentationSelector.scope.id, next.node]]);
+  p.usage.presentationSelector.resolve(next.node, chain);
+  assert.equal(next.store.get(next.presentation).data.rate_limit_upsell, undefined);
+  await p.configure(false);
+  assert.equal(next.store.get(next.presentation), next.store.get(next.rawUsage));
 });
 
 test("shared quota lock notifies mounted composers without disabling unrelated restrictions", async () => {
