@@ -1,11 +1,11 @@
 {
   "id": "local.project-colors",
   "name": "Project Colors",
-  "version": "0.1.2",
-  "description": "Color project folders and titles, with optional sidebar background tints. Choose colors from the project menu or tweak settings.",
-  "scope": "renderer",
+  "version": "0.2.2",
+  "description": "Color project folders, titles and Activity conversations, with optional background tints. Choose presets or custom colors from the project menu or tweak settings.",
+  "scope": "both",
   "main": "index.js",
   "githubRepo": "DOCaCola/CodexDC-Tweaks",
   "author": "DOCaCola",
-  "minRuntime": ">=1.0.0"
+  "minRuntime": ">=1.0.9"
 }

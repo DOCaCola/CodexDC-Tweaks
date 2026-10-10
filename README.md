@@ -7,7 +7,7 @@ Install and update them from the **Tweak Store** inside CodexDC.
 | --- | --- |
 | Hide Get Plus Button | Hide the profile upgrade control |
 | Message Timestamps | Display message timestamps |
-| Project Colors | Color project folders and titles, with optional background tints |
+| Project Colors | Color project folders, titles and Activity conversations, with presets or custom colors |
 | Restart Session Command | Add a command to restart the shared local backend |
 | Shell Display Fixes | Simplify displayed MSYS shell prefixes on Windows |
 | Usage Lock Override | Keep model selection and chat input available after usage exhaustion |
@@ -20,7 +20,9 @@ It applies to open and newly opened app windows without restarting the backend.
 Provider usage limits still apply.
 
 Project Colors keeps projects uncolored by default and offers **Project color…**
-in project menus. Choose None, Auto, or one of seven colors there or in the tweak's settings.
+in project menus. Choose None, Auto, one of seven colors, or Custom there or in the tweak's settings.
+Activity conversations inherit their project's color. Custom reuses the Appearance
+settings picker and supports hex input.
 Selections follow project IDs across renames; projects with the same name keep
 separate choices. Background tints can be switched off independently.
 

@@ -6,6 +6,8 @@ const GROUP = "[data-sidebar-project-kind][role='listitem']";
 const COLOR = "data-codexdc-project-color";
 const TINT = "data-codexdc-project-tint";
 const TITLE = "data-codexdc-project-color-header";
+const THREAD = "[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-id]";
+const CONVERSATION = "data-codexdc-project-conversation-color";
 const PALETTE = [
   ["blue", "Blue", "var(--color-chart-blue)"],
   ["green", "Green", "var(--color-chart-green)"],
@@ -18,6 +20,20 @@ const PALETTE = [
 const OPTIONS = [["none", "None", null], ["auto", "Auto", null], ...PALETTE];
 const COLORS_KEY = "projectColors";
 const TINT_KEY = "tintBackgrounds";
+const isCustom = color => /^#[0-9a-f]{6}$/i.test(color);
+
+function conversationProject(api, node) {
+  // Activity rows carry their project group in their secondary-content props.
+  // Read identities, never displayed project names or minified component names.
+  for (let fiber = api.react.getFiber(node); fiber; fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    const group = props?.projectGroup ?? props?.secondaryContent?.props?.projectGroup;
+    if (group?.projectId != null && group.projectKind != null) {
+      return JSON.stringify([group.projectKind, group.projectId]);
+    }
+  }
+  return null;
+}
 
 function automaticColor(key) {
   let hash = 2166136261;
@@ -36,19 +52,56 @@ ${PALETTE.map(([id, , value]) => `[${COLOR}="${id}"] { --codexdc-project-accent:
 [${COLOR}] [${TITLE}] [data-sidebar-project-drop-zone="project-icon"] svg {
   color: color-mix(in srgb, var(--codexdc-project-accent) 80%, var(--color-text));
 }
+[${CONVERSATION}] [data-thread-title] {
+  color: color-mix(in srgb, var(--codexdc-project-accent) 80%, var(--color-text));
+}
+[${CONVERSATION}][${TINT}] {
+  background: color-mix(in srgb, var(--codexdc-project-accent) 7%, transparent);
+}
 .codexdc-project-color-dialog {
   width: 100vw; height: 100dvh; max-width: none; max-height: none;
   margin: 0; border: 0; padding: 0; background: transparent;
   color: var(--color-text);
 }
 .codexdc-project-color-dialog::backdrop { background: transparent; }
-.codexdc-project-color-panel { width: 400px; max-height: 92dvh; overflow-y: auto; }
-.codexdc-project-color-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.codexdc-project-color-panel { width: 400px; max-width: 92vw; max-height: 92dvh; overflow-y: auto; padding: 24px; box-sizing: border-box; }
+.codexdc-project-color-heading { margin-bottom: 20px; padding-inline-end: 24px; }
+.codexdc-project-color-heading h2 { margin: 0 0 8px; font-size: 20px; line-height: 28px; font-weight: 600; }
+.codexdc-project-color-heading p { margin: 0; font-size: 13px; line-height: 20px; color: var(--color-text-secondary); }
+.codexdc-project-color-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.codexdc-project-color-actions button { min-height: 32px; padding-inline: 12px; }
+.codexdc-project-color-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 32px; }
+.codexdc-project-color-select { min-width: 110px; }
+.codexdc-project-custom-trigger { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--color-border); border-radius: 999px; background: transparent; color: var(--color-text); padding: 6px 10px; font: inherit; cursor: pointer; }
+.codexdc-project-custom-trigger[hidden] { display: none; }
+.codexdc-project-custom-trigger .codexdc-project-color-swatch { margin: 0; }
+.codexdc-project-color-field, .codexdc-project-color-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
+.codexdc-project-color-setting-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.codexdc-project-custom-popup {
+  position: fixed; inset: auto; top: anchor(bottom); left: anchor(left); margin: 8px 0 0;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  padding: 16px; width: 234px; max-width: calc(100vw - 24px); box-sizing: border-box;
+  border: 0.5px solid var(--color-border); border-radius: 16px;
+  color: var(--color-text); background: var(--color-surface-elevated-secondary);
+  box-shadow: 0 12px 32px #0004;
+}
+.codexdc-project-custom-popup-heading { display: block; margin-bottom: 12px; font-size: 14px; font-weight: 600; }
+.codexdc-project-custom-done { display: block; margin: 12px 0 0 auto; padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: transparent; color: var(--color-text); cursor: pointer; }
+.codexdc-project-color-preview { margin-top: 20px; padding: 12px; border: 1px solid var(--color-border); border-radius: 12px; }
+.codexdc-project-color-preview-caption { display: block; margin-bottom: 10px; font-size: 12px; color: var(--color-text-secondary); }
+.codexdc-project-color-preview-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px; }
+.codexdc-project-color-preview-row .select-none, .codexdc-project-color-preview-row [data-thread-title] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codexdc-project-color-preview-row svg { width: 18px; height: 18px; flex-shrink: 0; }
+.codexdc-project-color-preview-activity { display: block; margin: 14px 10px 4px; font-size: 11px; color: var(--color-text-secondary); }
 .codexdc-project-color-swatch {
   display: inline-block; width: 12px; height: 12px; margin-inline-end: 6px; border-radius: 50%;
 }
 .codexdc-project-color-settings label { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
 .codexdc-project-color-settings select { margin-inline-start: auto; }
+.codexdc-project-custom-editor { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.codexdc-project-custom-picker.react-colorful { width: 200px; height: 160px; }
+.codexdc-project-custom-hex { width: 100px; padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 999px; background: transparent; color: var(--color-text); }
+[data-codexdc-picker-state="error"]::after { content: "Color picker unavailable. Enter a hex color."; font-size: 12px; }
 `;
 }
 
@@ -57,6 +110,8 @@ ${PALETTE.map(([id, , value]) => `[${COLOR}="${id}"] { --codexdc-project-accent:
 function createProjectColors(api, doc) {
   const win = doc.defaultView;
   const rows = new Map();
+  const conversations = new Map();
+  const dirtyConversations = new Set();
   const sidebars = new Map();
   const dirty = new Set();
   const menus = new Map();
@@ -68,6 +123,7 @@ function createProjectColors(api, doc) {
   let menuTimer = null;
   let dialog = null;
   let stopped = false;
+  let nextControlId = 0;
   const style = doc.createElement("style");
   style.id = "codexdc-project-colors-style";
   style.textContent = styleText();
@@ -78,27 +134,49 @@ function createProjectColors(api, doc) {
     return [...(node.matches(selector) ? [node] : []), ...node.querySelectorAll(selector)];
   }
   function clear(row) {
-    row.group.removeAttribute(COLOR);
-    row.group.removeAttribute(TINT);
+    clearElement(row.group);
     row.header.removeAttribute(TITLE);
   }
+  function clearElement(node) {
+    node.removeAttribute(COLOR);
+    node.removeAttribute(TINT);
+    node.removeAttribute(CONVERSATION);
+    node.style.removeProperty("--codexdc-project-accent");
+  }
+  function paintElement(node, key) {
+    return paintSelection(node, colors[key] ?? "none", key);
+  }
+  function paintSelection(node, selection, key) {
+    if (selection === "none") { clearElement(node); return false; }
+    const color = selection === "auto" ? automaticColor(key) : selection;
+    const marker = isCustom(color) ? "custom" : color;
+    if (node.getAttribute(COLOR) !== marker) node.setAttribute(COLOR, marker);
+    if (isCustom(color)) {
+      if (node.style.getPropertyValue("--codexdc-project-accent") !== color) {
+        node.style.setProperty("--codexdc-project-accent", color);
+      }
+    } else node.style.removeProperty("--codexdc-project-accent");
+    node.toggleAttribute(TINT, tint);
+    return true;
+  }
   function paint(row) {
-    const selection = colors[row.key] ?? "none";
-    if (selection === "none") {
-      clear(row);
-      return;
-    }
-    const color = selection === "auto" ? automaticColor(row.key) : selection;
-    if (row.group.getAttribute(COLOR) !== color) row.group.setAttribute(COLOR, color);
-    row.group.toggleAttribute(TINT, tint);
-    row.header.setAttribute(TITLE, "");
+    row.header.toggleAttribute(TITLE, paintElement(row.group, row.key));
+  }
+  function paintConversation(node, key) {
+    if (paintElement(node, key)) node.setAttribute(CONVERSATION, "");
+  }
+  function repaint() {
+    for (const row of rows.values()) paint(row);
+    for (const [node, key] of conversations) paintConversation(node, key);
   }
   function flush() {
     frame = null;
+    let projectsChanged = dirty.size > 0;
     for (const [header, row] of rows) {
       if (!header.isConnected || !header.matches(HEADER) || !header.closest(SIDEBAR) || !header.closest(GROUP)) {
         clear(row);
         rows.delete(header);
+        projectsChanged = true;
       }
     }
     for (const header of dirty) {
@@ -119,7 +197,20 @@ function createProjectColors(api, doc) {
       paint(row);
     }
     dirty.clear();
-    renderSettings();
+    for (const [node] of conversations) {
+      if (!node.isConnected || !node.matches(THREAD) || !node.closest(SIDEBAR) || node.closest(GROUP)) {
+        clearElement(node);
+        conversations.delete(node);
+      }
+    }
+    for (const node of dirtyConversations) {
+      if (!node.isConnected || !node.matches(THREAD) || !node.closest(SIDEBAR) || node.closest(GROUP)) continue;
+      const key = conversationProject(api, node);
+      conversations.set(node, key);
+      paintConversation(node, key);
+    }
+    dirtyConversations.clear();
+    if (projectsChanged) renderSettings();
   }
   function schedule() {
     if (frame === null) frame = win.requestAnimationFrame(flush);
@@ -127,7 +218,9 @@ function createProjectColors(api, doc) {
   function scan(node) {
     const headers = matching(node, HEADER);
     for (const header of headers) dirty.add(header);
-    if (headers.length) schedule();
+    const threads = matching(node, THREAD).filter(thread => !thread.closest(GROUP));
+    for (const thread of threads) dirtyConversations.add(thread);
+    if (headers.length || threads.length) schedule();
   }
   function attachSidebar(root) {
     if (sidebars.has(root)) return;
@@ -140,9 +233,11 @@ function createProjectColors(api, doc) {
           } else scan(record.target);
         } else {
           for (const node of record.addedNodes) scan(node);
+          const thread = record.target.nodeType === 1 && record.target.closest(THREAD);
+          if (thread && !thread.closest(GROUP)) { dirtyConversations.add(thread); schedule(); }
           // Removing thread rows cannot affect the project ledger.
           for (const node of record.removedNodes) {
-            if (matching(node, HEADER).length) schedule();
+            if (matching(node, HEADER).length || matching(node, THREAD).some(thread => conversations.has(thread))) schedule();
           }
         }
       }
@@ -152,19 +247,145 @@ function createProjectColors(api, doc) {
       attributeFilter: [
         "data-app-action-sidebar-project-id", "data-app-action-sidebar-project-row",
         "data-app-action-sidebar-project-label", "data-sidebar-project-kind",
+        "data-app-action-sidebar-thread-id", "data-app-action-sidebar-thread-row",
       ],
     });
     sidebars.set(root, observer);
     scan(root);
   }
-  function setColor(key, color) {
+  function setColor(key, color, refreshSettings = true) {
     // Read at the time of the edit so other windows' selections are preserved.
     colors = { ...api.storage.get(COLORS_KEY, {}) };
     if (color === "none") delete colors[key];
     else colors[key] = color;
     api.storage.set(COLORS_KEY, colors);
-    for (const row of rows.values()) paint(row);
-    renderSettings();
+    repaint();
+    if (refreshSettings) renderSettings();
+  }
+  function customControl(value, onChange) {
+    const editor = doc.createElement("div");
+    editor.className = "codexdc-project-custom-editor";
+    const picker = doc.createElement("div");
+    picker.setAttribute("data-codexdc-custom-picker", "");
+    picker.setAttribute("data-codexdc-custom-value", value);
+    const hex = doc.createElement("input");
+    hex.className = "codexdc-project-custom-hex";
+    hex.type = "text";
+    hex.value = value;
+    hex.maxLength = 7;
+    hex.setAttribute("aria-label", "Custom project color hex");
+    hex.setAttribute("placeholder", "#RRGGBB");
+    function request() {
+      picker.dispatchEvent(new win.Event("codexdc:project-color-picker", { bubbles: true }));
+    }
+    picker.addEventListener("codexdc:project-custom-color", () => {
+      const color = picker.getAttribute("data-codexdc-custom-value");
+      if (!isCustom(color)) return;
+      hex.value = color;
+      hex.setCustomValidity("");
+      onChange(color);
+    });
+    hex.addEventListener("input", () => {
+      const color = hex.value.startsWith("#") ? hex.value : `#${hex.value}`;
+      hex.setCustomValidity(isCustom(color) ? "" : "Enter a six-digit hex color.");
+      if (!isCustom(color)) return;
+      picker.setAttribute("data-codexdc-custom-value", color.toLowerCase());
+      request();
+      onChange(color.toLowerCase());
+    });
+    editor.append(picker, hex);
+    return editor;
+  }
+  function colorControl(value, label, onChange) {
+    let customColor = isCustom(value) ? value : "#3b82f6";
+    const id = `codexdc-project-color-${++nextControlId}`;
+    const element = doc.createElement("div");
+    element.className = "codexdc-project-color-control";
+    const select = doc.createElement("div");
+    select.id = id;
+    select.className = "codexdc-project-color-select";
+    select.setAttribute("aria-label", label);
+    select.setAttribute("data-codexdc-color-select", "");
+    select.setAttribute("data-codexdc-color-value", isCustom(value) ? "custom" : value);
+    select.setAttribute("data-codexdc-color-options", JSON.stringify([...OPTIONS, ["custom", "Custom…", null]]));
+    const selection = () => select.getAttribute("data-codexdc-color-value");
+    const trigger = doc.createElement("button");
+    trigger.type = "button";
+    trigger.className = "codexdc-project-custom-trigger";
+    trigger.style.anchorName = `--${id}`;
+    trigger.setAttribute("aria-label", "Edit custom project color");
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    const swatch = doc.createElement("span");
+    swatch.className = "codexdc-project-color-swatch";
+    swatch.setAttribute("aria-hidden", "true");
+    const hexLabel = doc.createElement("span");
+    trigger.append(swatch, hexLabel);
+    const popup = doc.createElement("div");
+    popup.id = `${id}-popup`;
+    popup.className = "codexdc-project-custom-popup";
+    popup.setAttribute("popover", "auto");
+    popup.setAttribute("role", "dialog");
+    popup.setAttribute("aria-label", "Custom project color");
+    popup.style.positionAnchor = `--${id}`;
+    trigger.setAttribute("aria-controls", popup.id);
+    function updateCustom() {
+      trigger.hidden = selection() !== "custom";
+      swatch.style.background = customColor;
+      hexLabel.textContent = customColor.toUpperCase();
+    }
+    const heading = doc.createElement("span");
+    heading.className = "codexdc-project-custom-popup-heading";
+    heading.textContent = "Custom color";
+    const editor = customControl(customColor, color => {
+      customColor = color;
+      updateCustom();
+      onChange(color);
+    });
+    const hex = editor.querySelector("input");
+    const done = doc.createElement("button");
+    done.type = "button";
+    done.className = "codexdc-project-custom-done";
+    done.textContent = "Done";
+    done.addEventListener("click", () => {
+      if (!hex.reportValidity()) return;
+      popup.hidePopover();
+      trigger.focus();
+    });
+    popup.append(heading, editor, done);
+    popup.addEventListener("beforetoggle", event => {
+      trigger.setAttribute("aria-expanded", String(event.newState === "open"));
+    });
+    function open() {
+      popup.showPopover();
+      editor.querySelector("[data-codexdc-custom-picker]")
+        .dispatchEvent(new win.Event("codexdc:project-color-picker", { bubbles: true }));
+      hex.focus();
+    }
+    trigger.addEventListener("click", () => {
+      if (trigger.getAttribute("aria-expanded") === "true") popup.hidePopover();
+      else open();
+    });
+    select.addEventListener("codexdc:project-color-selection", () => {
+      updateCustom();
+      onChange(selection() === "custom" ? customColor : selection());
+      if (selection() === "custom") open();
+      else if (trigger.getAttribute("aria-expanded") === "true") popup.hidePopover();
+    });
+    updateCustom();
+    element.append(select, trigger, popup);
+    win.queueMicrotask(() => {
+      if (select.isConnected) select.dispatchEvent(new win.Event("codexdc:project-color-select", { bubbles: true }));
+    });
+    return {
+      element, select,
+      valid() {
+        if (selection() !== "custom" || hex.checkValidity()) return true;
+        open();
+        hex.reportValidity();
+        return false;
+      },
+    };
   }
   function openPicker(row) {
     if (stopped) return;
@@ -181,7 +402,7 @@ function createProjectColors(api, doc) {
     const panel = doc.createElement("div");
     panel.className = "codex-dialog codexdc-project-color-panel fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 outline-none bg-surface-elevated-secondary/90 text-default ring-[0.5px] ring-border shadow-lg backdrop-blur-xl rounded-3xl max-w-[92vw] p-6";
     const heading = doc.createElement("div");
-    heading.className = "flex flex-col items-start gap-3 mb-6 pe-6";
+    heading.className = "codexdc-project-color-heading";
     const title = doc.createElement("h2");
     title.id = "codexdc-project-color-title";
     title.className = "heading-dialog min-w-0 font-semibold text-default";
@@ -211,39 +432,68 @@ function createProjectColors(api, doc) {
       button.append(inner);
       return { button, inner };
     }
-    const options = doc.createElement("div");
-    options.className = "codexdc-project-color-options";
-    for (const [id, label, value] of OPTIONS) {
-      const selected = (colors[row.key] ?? "none") === id;
-      const { button, inner } = nativeButton(label, selected ? "primary" : "secondary");
-      button.setAttribute("aria-pressed", String(selected));
-      button.toggleAttribute("data-selected", selected);
-      button.classList.add("w-full");
-      if (value) {
-        const swatch = doc.createElement("span");
-        swatch.className = "codexdc-project-color-swatch";
-        swatch.style.background = value;
-        swatch.setAttribute("aria-hidden", "true");
-        inner.prepend(swatch);
-      }
-      button.addEventListener("click", () => {
-        setColor(row.key, id);
-        current.close();
-      });
-      options.append(button);
+    let draft = colors[row.key] ?? "none";
+    const preview = doc.createElement("div");
+    preview.className = "codexdc-project-color-preview";
+    preview.setAttribute("role", "group");
+    preview.setAttribute("aria-label", "Color preview");
+    const caption = doc.createElement("span");
+    caption.className = "codexdc-project-color-preview-caption";
+    caption.textContent = "Preview";
+    const sampleProject = doc.createElement("div");
+    const sampleHeader = doc.createElement("div");
+    sampleHeader.className = "codexdc-project-color-preview-row";
+    sampleHeader.setAttribute(TITLE, "");
+    const icon = doc.createElement("span");
+    icon.setAttribute("data-sidebar-project-drop-zone", "project-icon");
+    icon.append(row.header.querySelector("[data-sidebar-project-drop-zone='project-icon'] svg").cloneNode(true));
+    const sampleTitle = doc.createElement("span");
+    sampleTitle.className = "select-none";
+    sampleTitle.textContent = row.label;
+    sampleHeader.append(icon, sampleTitle);
+    sampleProject.append(sampleHeader);
+    const activityLabel = doc.createElement("span");
+    activityLabel.className = "codexdc-project-color-preview-activity";
+    activityLabel.textContent = "Activity";
+    const sampleConversation = doc.createElement("div");
+    sampleConversation.className = "codexdc-project-color-preview-row";
+    const conversationTitle = doc.createElement("span");
+    conversationTitle.setAttribute("data-thread-title", "");
+    conversationTitle.textContent = "Sample conversation";
+    sampleConversation.append(conversationTitle);
+    preview.append(caption, sampleProject, activityLabel, sampleConversation);
+    function updatePreview() {
+      paintSelection(sampleProject, draft, row.key);
+      if (paintSelection(sampleConversation, draft, row.key)) sampleConversation.setAttribute(CONVERSATION, "");
     }
+    const control = colorControl(draft, `Color for ${row.label}`, color => {
+      draft = color;
+      updatePreview();
+    });
+    const field = doc.createElement("div");
+    field.className = "codexdc-project-color-field";
+    const fieldLabel = doc.createElement("span");
+    fieldLabel.textContent = "Color";
+    field.append(fieldLabel, control.element);
+    updatePreview();
+    const apply = nativeButton("Apply", "primary").button;
+    apply.addEventListener("click", () => {
+      if (!control.valid()) return;
+      setColor(row.key, draft);
+      current.close();
+    });
     const { button: cancel } = nativeButton("Cancel");
     cancel.addEventListener("click", () => current.close());
     const actions = doc.createElement("div");
-    actions.className = "flex items-center justify-end gap-2 mt-6";
-    actions.append(cancel);
+    actions.className = "codexdc-project-color-actions";
+    actions.append(cancel, apply);
     const close = doc.createElement("button");
     close.type = "button";
     close.className = "no-drag cursor-interaction leading-none hover:bg-primary-ghost-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 text-text/80 rounded p-1 absolute top-4 right-4";
     close.setAttribute("aria-label", "Close");
     close.innerHTML = '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="m3 3 6 6M9 3 3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     close.addEventListener("click", () => current.close());
-    panel.append(heading, options, actions, close);
+    panel.append(heading, field, preview, actions, close);
     current.append(overlay, panel);
     current.addEventListener("close", () => {
       current.remove();
@@ -370,7 +620,7 @@ function createProjectColors(api, doc) {
       checkbox.addEventListener("change", () => {
         tint = checkbox.checked;
         api.storage.set(TINT_KEY, tint);
-        for (const row of rows.values()) paint(row);
+        repaint();
       });
       tintLabel.append(checkbox, "Tint project backgrounds");
       root.append(tintLabel);
@@ -381,22 +631,16 @@ function createProjectColors(api, doc) {
         root.append(empty);
       }
       for (const row of projects.values()) {
-        const label = doc.createElement("label");
+        const setting = doc.createElement("div");
+        setting.className = "codexdc-project-color-setting-row";
+        const label = doc.createElement("span");
         // Preserve the display label but distinguish equal names in settings.
         label.textContent = row.label;
         label.title = row.header.getAttribute("data-app-action-sidebar-project-id");
-        const select = doc.createElement("select");
-        select.setAttribute("aria-label", `Color for ${row.label}`);
-        for (const [id, name] of OPTIONS) {
-          const option = doc.createElement("option");
-          option.value = id;
-          option.textContent = name;
-          select.append(option);
-        }
-        select.value = colors[row.key] ?? "none";
-        select.addEventListener("change", () => setColor(row.key, select.value));
-        label.append(select);
-        root.append(label);
+        const value = colors[row.key] ?? "none";
+        const control = colorControl(value, `Color for ${row.label}`, color => setColor(row.key, color, false));
+        setting.append(label, control.element);
+        root.append(setting);
       }
     }
   }
@@ -404,7 +648,7 @@ function createProjectColors(api, doc) {
     if (event.key !== "codexpp:storage:local.project-colors") return;
     colors = api.storage.get(COLORS_KEY, {});
     tint = api.storage.get(TINT_KEY, true);
-    for (const row of rows.values()) paint(row);
+    repaint();
     renderSettings();
   }
   win.addEventListener("storage", syncStorage);
@@ -432,7 +676,12 @@ function createProjectColors(api, doc) {
       dialog?.remove();
       for (const [button, cleanup] of menus) { cleanup(); button.remove(); }
       for (const row of rows.values()) clear(row);
+      for (const node of conversations.keys()) clearElement(node);
       style.remove();
+      for (const root of settingsRoots) {
+        root.replaceChildren();
+        root.classList.remove("codexdc-project-color-settings");
+      }
       settingsRoots.clear();
     },
   };
@@ -440,7 +689,11 @@ function createProjectColors(api, doc) {
 
 let controller;
 module.exports = {
-  start(api) { controller = createProjectColors(api, document); },
+  start(api) {
+    controller = api.process === "main"
+      ? require("./native-picker.js").startPickerHost(api)
+      : createProjectColors(api, document);
+  },
   stop() { controller?.stop(); controller = null; },
-  __test: { createProjectColors, automaticColor },
+  __test: { createProjectColors, automaticColor, conversationProject },
 };

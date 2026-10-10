@@ -1,9 +1,21 @@
 # Project Colors
 
-Colors project folder icons and titles in the sidebar. Subtle background tints
+Colors project folder icons and titles in the sidebar, plus conversations in
+Activity (and other ungrouped sidebar lists) using their project's color. Subtle background tints
 are optional. Projects are uncolored by default. Choose None, Auto, or
-Blue, Green, Yellow, Red, Pink, Purple, or Gray from **Project color…** in its
+Blue, Green, Yellow, Red, Pink, Purple, Gray, or **Custom…** from **Project color…** in its
 context/overflow menu or from the tweak's settings.
+
+Custom uses the installed Appearance settings' hue/saturation picker and a
+six-digit hex field in a compact popup. The project dialog and tweak settings use
+the actual Appearance settings dropdown components, including its rounded trigger,
+color swatches, radio-menu selection indicators and keyboard navigation.
+The dialog shows a live preview
+of the project heading and an Activity conversation; **Apply** saves the choice
+and **Cancel** discards it. The tweak settings save edits immediately.
+The picker runs in the app's main
+JavaScript world through a small host bridge. Module and export names are
+discovered from the installed app rather than pinned to a build hash.
 
 None restores the native project appearance. Auto explicitly enables a
 deterministic color for that project.
@@ -17,7 +29,10 @@ Inspired by [Bennett's UI Improvements](https://github.com/b-nnett/codex-plusplu
 reports stuttering when expanding/collapsing projects with several conversations.
 The report has no trace or confirmed cause. This implementation uses sidebar
 attributes and CSS, without layout measurements during recoloring. Its observer
-ignores animation style/class changes and conversation-only additions.
+ignores animation style/class changes and conversation additions inside project groups.
 
-Requires the current desktop sidebar's semantic project attributes. Windows is
+Activity membership uses the React props bridge and exact project kind/ID.
+Conversations without project metadata stay uncolored. Requires the current
+desktop sidebar's semantic project attributes and the installed settings picker.
+Windows is
 the development platform; macOS needs real-app validation.
