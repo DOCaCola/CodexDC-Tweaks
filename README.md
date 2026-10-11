@@ -21,7 +21,7 @@ Provider usage limits still apply.
 
 Project Colors keeps projects uncolored by default and offers **Project color…**
 in project menus. Choose None, Auto, one of seven colors, or Custom there or in the tweak's settings.
-Activity conversations inherit their project's color. Custom reuses the Appearance
+Activity and Recents conversations inherit their project's color. Custom reuses the Appearance
 settings picker and supports hex input.
 Selections follow project IDs across renames; projects with the same name keep
 separate choices. Background tints can be switched off independently.

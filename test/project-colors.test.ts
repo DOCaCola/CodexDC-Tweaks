@@ -90,6 +90,66 @@ function activityThread(doc: Document, id: string, projectId: string | null, kin
   return node;
 }
 
+function recentThread(doc: Document, id: string, projectId: string | null) {
+  const node = activityThread(doc, id, null);
+  (node as any).testFiber = {
+    memoizedProps: { "data-app-action-sidebar-thread-id": id },
+    return: { memoizedProps: { hoverCardProjectId: projectId, hoverCardProjectLabel: "Same name" }, return: null },
+  };
+  return node;
+}
+
+test("Recents inherit saved project colors without Activity metadata or mounted project headings", async () => {
+  const h = setup({ projectColors: { [key("/work/one")]: "#1256ab", [key("ssh", "remote")]: "purple" } });
+  try {
+    h.first.group.remove();
+    const recent = recentThread(h.doc, "local:recent", "/work/one");
+    const remote = recentThread(h.doc, "local:ssh", "ssh");
+    const projectless = recentThread(h.doc, "local:projectless", null);
+    h.sidebar.append(recent, remote, projectless);
+    await h.settle();
+    assert.equal(recent.getAttribute(colorAttr), "custom");
+    assert.equal(recent.style.getPropertyValue("--codexdc-project-accent"), "#1256ab");
+    assert.equal(remote.getAttribute(colorAttr), "purple");
+    assert.equal(projectless.hasAttribute(colorAttr), false);
+    h.stored.projectColors = { [key("/work/one")]: "auto", [key("ssh", "remote")]: "green" };
+    h.dom.window.dispatchEvent(new h.dom.window.StorageEvent("storage", { key: "codexpp:storage:local.project-colors" }));
+    assert.equal(recent.getAttribute(colorAttr), automaticColor(key("/work/one")));
+    assert.equal(remote.getAttribute(colorAttr), "green");
+    assert.equal(recent.style.getPropertyValue("--codexdc-project-accent"), "");
+  } finally { h.cleanup(); }
+});
+
+test("Recents acquire newly chosen colors and avoid ambiguous local/remote project IDs", async () => {
+  const h = setup();
+  try {
+    const recent = recentThread(h.doc, "local:recent", "/work/one");
+    h.sidebar.append(recent);
+    await h.settle();
+    const root = h.settings();
+    h.selectColor(root, "blue");
+    assert.equal(recent.getAttribute(colorAttr), "blue");
+    h.selectColor(root, "none");
+    assert.equal(recent.hasAttribute(colorAttr), false);
+    const collision = recentThread(h.doc, "local:collision", "shared");
+    h.stored.projectColors = { [key("shared")]: "red" };
+    h.dom.window.dispatchEvent(new h.dom.window.StorageEvent("storage", { key: "codexpp:storage:local.project-colors" }));
+    h.sidebar.append(collision);
+    await h.settle();
+    assert.equal(collision.getAttribute(colorAttr), "red");
+    const remoteProject = project(h.doc, "shared", "Same name", "remote");
+    h.sidebar.append(remoteProject.group);
+    await h.settle();
+    assert.equal(collision.hasAttribute(colorAttr), false, "A bare ID cannot distinguish projects of different kinds");
+    (collision as any).testFiber.return.memoizedProps.secondaryContent = {
+      props: { projectGroup: { projectId: "shared", projectKind: "local" } },
+    };
+    collision.setAttribute("data-app-action-sidebar-thread-id", "local:resolved");
+    await h.settle();
+    assert.equal(collision.getAttribute(colorAttr), "red");
+  } finally { h.cleanup(); }
+});
+
 test("Activity conversations use project identities without needing mounted project headers", async () => {
   const h = setup({ projectColors: { [key("/work/one")]: "blue", [key("same", "remote")]: "pink" } });
   try {

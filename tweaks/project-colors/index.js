@@ -22,17 +22,20 @@ const COLORS_KEY = "projectColors";
 const TINT_KEY = "tintBackgrounds";
 const isCustom = color => /^#[0-9a-f]{6}$/i.test(color);
 
-function conversationProject(api, node) {
-  // Activity rows carry their project group in their secondary-content props.
+function conversationProject(api, node, projectsById) {
+  // Activity carries a full project group; Recents uses hover-card project IDs.
   // Read identities, never displayed project names or minified component names.
+  let projectId = null;
   for (let fiber = api.react.getFiber(node); fiber; fiber = fiber.return) {
     const props = fiber.memoizedProps;
     const group = props?.projectGroup ?? props?.secondaryContent?.props?.projectGroup;
     if (group?.projectId != null && group.projectKind != null) {
       return JSON.stringify([group.projectKind, group.projectId]);
     }
+    projectId ??= props?.hoverCardProjectId;
   }
-  return null;
+  const matches = projectsById.get(projectId);
+  return matches?.size === 1 ? matches.values().next().value : null;
 }
 
 function automaticColor(key) {
@@ -167,7 +170,23 @@ function createProjectColors(api, doc) {
   }
   function repaint() {
     for (const row of rows.values()) paint(row);
-    for (const [node, key] of conversations) paintConversation(node, key);
+    const projects = projectIdentities();
+    for (const [node] of conversations) {
+      const key = conversationProject(api, node, projects);
+      conversations.set(node, key);
+      paintConversation(node, key);
+    }
+  }
+  function projectIdentities() {
+    const projects = new Map();
+    // Include saved identities when a project's heading isn't mounted, such as
+    // in Activity or when a project isn't visible in the sidebar.
+    for (const key of new Set([...Object.keys(colors), ...[...rows.values()].map(row => row.key)])) {
+      const [, id] = JSON.parse(key);
+      if (!projects.has(id)) projects.set(id, new Set());
+      projects.get(id).add(key);
+    }
+    return projects;
   }
   function flush() {
     frame = null;
@@ -203,9 +222,15 @@ function createProjectColors(api, doc) {
         conversations.delete(node);
       }
     }
+    // Project headers can arrive after Recents. Revisit membership when the
+    // project ledger changes, including conversations previously unresolved.
+    if (projectsChanged) {
+      for (const node of conversations.keys()) dirtyConversations.add(node);
+    }
+    const projects = projectIdentities();
     for (const node of dirtyConversations) {
       if (!node.isConnected || !node.matches(THREAD) || !node.closest(SIDEBAR) || node.closest(GROUP)) continue;
-      const key = conversationProject(api, node);
+      const key = conversationProject(api, node, projects);
       conversations.set(node, key);
       paintConversation(node, key);
     }

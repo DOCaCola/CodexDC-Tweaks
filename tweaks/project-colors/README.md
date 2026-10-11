@@ -1,7 +1,7 @@
 # Project Colors
 
 Colors project folder icons and titles in the sidebar, plus conversations in
-Activity (and other ungrouped sidebar lists) using their project's color. Subtle background tints
+Activity and Recents using their project's color. Subtle background tints
 are optional. Projects are uncolored by default. Choose None, Auto, or
 Blue, Green, Yellow, Red, Pink, Purple, Gray, or **Custom…** from **Project color…** in its
 context/overflow menu or from the tweak's settings.
@@ -31,7 +31,9 @@ The report has no trace or confirmed cause. This implementation uses sidebar
 attributes and CSS, without layout measurements during recoloring. Its observer
 ignores animation style/class changes and conversation additions inside project groups.
 
-Activity membership uses the React props bridge and exact project kind/ID.
+Activity and Recents membership use the React props bridge and project IDs.
+Recents' hover-card project IDs resolve against known project identities;
+ambiguous IDs shared by different project kinds stay uncolored.
 Conversations without project metadata stay uncolored. Requires the current
 desktop sidebar's semantic project attributes and the installed settings picker.
 Windows is
