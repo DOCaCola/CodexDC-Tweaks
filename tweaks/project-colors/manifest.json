@@ -1,7 +1,7 @@
 {
   "id": "local.project-colors",
   "name": "Project Colors",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Color project folders, titles and conversations in Activity and Recents, with optional background tints. Choose presets or custom colors from the project menu or tweak settings.",
   "scope": "both",
   "main": "index.js",

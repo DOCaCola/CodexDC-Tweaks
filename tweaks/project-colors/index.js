@@ -48,7 +48,11 @@ function styleText() {
   return `
 ${PALETTE.map(([id, , value]) => `[${COLOR}="${id}"] { --codexdc-project-accent: ${value}; }`).join("\n")}
 [${COLOR}][${TINT}] {
-  background: color-mix(in srgb, var(--codexdc-project-accent) 7%, transparent);
+  /* Layer the tint over the native background without replacing row states. */
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--codexdc-project-accent) 7%, transparent),
+    color-mix(in srgb, var(--codexdc-project-accent) 7%, transparent)
+  );
   border-radius: 8px;
 }
 [${COLOR}] [${TITLE}] .select-none,
@@ -57,9 +61,6 @@ ${PALETTE.map(([id, , value]) => `[${COLOR}="${id}"] { --codexdc-project-accent:
 }
 [${CONVERSATION}] [data-thread-title] {
   color: color-mix(in srgb, var(--codexdc-project-accent) 80%, var(--color-text));
-}
-[${CONVERSATION}][${TINT}] {
-  background: color-mix(in srgb, var(--codexdc-project-accent) 7%, transparent);
 }
 .codexdc-project-color-dialog {
   width: 100vw; height: 100dvh; max-width: none; max-height: none;

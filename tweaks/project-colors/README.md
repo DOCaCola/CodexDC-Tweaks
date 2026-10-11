@@ -6,6 +6,9 @@ are optional. Projects are uncolored by default. Choose None, Auto, or
 Blue, Green, Yellow, Red, Pink, Purple, Gray, or **Custom…** from **Project color…** in its
 context/overflow menu or from the tweak's settings.
 
+Background tints layer over the app's native row backgrounds, preserving hover,
+selection, keyboard focus, and open-menu highlights in Activity and Recents.
+
 Custom uses the installed Appearance settings' hue/saturation picker and a
 six-digit hex field in a compact popup. The project dialog and tweak settings use
 the actual Appearance settings dropdown components, including its rounded trigger,
