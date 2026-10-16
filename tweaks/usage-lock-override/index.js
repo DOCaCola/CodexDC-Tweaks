@@ -7,6 +7,9 @@ const { configureUsageLocks } = require("./usage-locks.js");
 
 const STATE_KEY = "__codexdcUsageLockOverride__";
 const QUEUE_KEY = Symbol.for("codexdc.usage-lock-override.queues");
+// Codex moves code between its core startup bundles across releases. Every
+// lookup searches all of them and requires exactly one match overall.
+const CORE_BUNDLES = ["app-initial-", "app-primary-", "app-shared-"];
 
 // Discover the feature layer from the installed renderer, not a minified name
 // or a catalog response. Refuse an unsupported build rather than report success.
@@ -31,8 +34,8 @@ function findSidebarAlertLayers(source) {
   return matches[0].slice(1);
 }
 
-function findUsageGate(source) {
-  const declarations = [...source.matchAll(
+function usageGateDeclarations(source) {
+  return [...source.matchAll(
     /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+\}\)=>\{/g,
   )].filter((match) => {
     const end = source.indexOf("})})))()}", match.index);
@@ -43,10 +46,35 @@ function findUsageGate(source) {
       && body.includes(".accountId!==")
       && body.includes(".windowMinutes===") && body.includes(".resetsAt===");
   });
-  if (declarations.length !== 1) {
-    throw new Error("Unsupported Codex build: expected one shared usage-block selector");
-  }
-  return exportedSelector(source, declarations[0], "usage selector");
+}
+
+function usagePresentationDeclarations(source) {
+  return [...source.matchAll(
+    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
+  )].filter((match) => {
+    const end = source.indexOf("refetchIntervalInBackground:", match.index);
+    const body = source.slice(match.index, end);
+    return end !== -1 && body.length < 7000
+      && body.includes("`base_interval_ms`")
+      && body.includes("`usage_scaling_multiplier`")
+      && body.includes(".rate_limit?.allowed===!1");
+  });
+}
+
+function findExportedSelector(bundles, declarations, label) {
+  const found = bundles.flatMap((bundle) =>
+    declarations(bundle.source).map((declaration) => ({ bundle, declaration })));
+  if (found.length !== 1) throw new Error(`Unsupported Codex build: expected one ${label}`);
+  const [{ bundle, declaration }] = found;
+  return { module: `/assets/${bundle.name}`, ...exportedSelector(bundle.source, declaration, label) };
+}
+
+function findUsageGate(bundles) {
+  return findExportedSelector(bundles, usageGateDeclarations, "shared usage-block selector");
+}
+
+function findUsagePresentation(bundles) {
+  return findExportedSelector(bundles, usagePresentationDeclarations, "shared usage presentation query");
 }
 
 function exportedSelector(source, declaration, label) {
@@ -62,38 +90,20 @@ function exportedSelector(source, declaration, label) {
   return { selector: exported(declaration[1]), initialize: exported(initializer) };
 }
 
-function findUsagePresentation(source) {
-  const declarations = [...source.matchAll(
-    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
-  )].filter((match) => {
-    const end = source.indexOf("refetchIntervalInBackground:", match.index);
-    const body = source.slice(match.index, end);
-    return end !== -1 && body.length < 7000
-      && body.includes("`base_interval_ms`")
-      && body.includes("`usage_scaling_multiplier`")
-      && body.includes(".rate_limit?.allowed===!1");
-  });
-  if (declarations.length !== 1) {
-    throw new Error("Unsupported Codex build: expected one shared usage presentation query");
-  }
-  return exportedSelector(source, declarations[0], "usage presentation");
-}
-
 function readConfiguration(appPath) {
   const assets = join(appPath, "webview", "assets");
-  function bundle(prefix) {
-    const files = readdirSync(assets).filter((name) => name.startsWith(prefix) && name.endsWith(".js"));
+  const names = readdirSync(assets);
+  const bundles = CORE_BUNDLES.map((prefix) => {
+    const files = names.filter((name) => name.startsWith(prefix) && name.endsWith(".js"));
     if (files.length !== 1) throw new Error(`Unsupported Codex build: expected one ${prefix} bundle`);
     return { name: files[0], source: readFileSync(join(assets, files[0]), "utf8") };
-  }
-  const initial = bundle("app-initial-");
-  const primary = bundle("app-primary-");
-  const shared = bundle("app-shared-");
+  });
+  const source = bundles.map((bundle) => bundle.source).join("\n");
   return {
-    layer: findReserveLayer(initial.source),
-    sidebarAlertLayers: findSidebarAlertLayers(initial.source),
-    usageGate: { module: `/assets/${primary.name}`, ...findUsageGate(primary.source) },
-    usagePresentation: { module: `/assets/${shared.name}`, ...findUsagePresentation(shared.source) },
+    layer: findReserveLayer(source),
+    sidebarAlertLayers: findSidebarAlertLayers(source),
+    usageGate: findUsageGate(bundles),
+    usagePresentation: findUsagePresentation(bundles),
   };
 }
 

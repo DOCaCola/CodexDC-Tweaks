@@ -1,7 +1,7 @@
 {
   "id": "local.usage-lock-override",
   "name": "Usage Lock Override",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Keeps model selection and chat input available when Codex or Work usage runs out, hides usage-exhaustion and sidebar usage alerts, and prevents forced Luna Reserve selection. Provider usage limits still apply.",
   "scope": "main",
   "main": "index.js",
