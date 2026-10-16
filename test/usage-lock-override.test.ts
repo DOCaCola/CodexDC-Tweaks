@@ -121,28 +121,33 @@ test("discovers personal and workspace sidebar alert layers without minified nam
   assert.throws(() => findSidebarAlertLayers(source + source), /expected one/);
 });
 
+const bundle = (name: string, source: string) => ({ name, source });
+
 test("discovers the exported shared usage gate and rejects missing or ambiguous gates", () => {
   const source = "var lock;function init(){return(init=once((()=>{lock=derived(scope,({get:g})=>{"
     + "let a=g(auth),q=g(quota).data;"
     + "if(a.authMethod!==`chatgpt`||a.accountId!==a.authenticatedAccountId||q.rate_limit?.allowed!==!1)return!1;"
     + "return windows.some(w=>w.windowMinutes===1&&w.resetsAt===2)"
     + "})})))()}export{lock as gate,init as setup};";
-  assert.deepEqual(findUsageGate(source), { selector: "gate", initialize: "setup" });
-  assert.throws(() => findUsageGate("export{};"), /expected one/);
-  assert.throws(() => findUsageGate(source + source), /expected one/);
-  assert.throws(() => findUsageGate(source.replace("lock as gate", "other as gate")), /export missing/);
+  assert.deepEqual(findUsageGate([bundle("primary.js", source)]),
+    { module: "/assets/primary.js", selector: "gate", initialize: "setup" });
+  assert.throws(() => findUsageGate([bundle("primary.js", "export{};")]), /expected one/);
+  assert.throws(() => findUsageGate([bundle("primary.js", source + source)]), /expected one/);
+  assert.throws(() => findUsageGate([bundle("primary.js", source.replace("lock as gate", "other as gate"))]), /export missing/);
 });
 
-test("discovers the shared usage presentation query without relying on minified symbols", () => {
+test("discovers the shared usage presentation query in whichever core bundle defines it", () => {
   const source = "var query;function init(){return(init=once((()=>{"
     + "query=querySignal(scope,({get:g,scope:s,queryClient:c})=>{"
     + "let interval=g(config).get(`base_interval_ms`,30000),scale=g(config).get(`usage_scaling_multiplier`,1);"
     + "return{queryKey:key,refetchInterval:r=>r.state.data?.rate_limit?.allowed===!1?5000:interval,"
     + "refetchIntervalInBackground:!0}})})))()}export{query as usage,init as setup};";
-  assert.deepEqual(findUsagePresentation(source), { selector: "usage", initialize: "setup" });
-  assert.throws(() => findUsagePresentation("export{};"), /expected one/);
-  assert.throws(() => findUsagePresentation(source + source), /expected one/);
-  assert.throws(() => findUsagePresentation(source.replace("query as usage", "other as usage")), /export missing/);
+  const other = bundle("shared.js", "export{};");
+  assert.deepEqual(findUsagePresentation([other, bundle("initial.js", source)]),
+    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
+  assert.throws(() => findUsagePresentation([other]), /expected one/);
+  assert.throws(() => findUsagePresentation([bundle("shared.js", source), bundle("initial.js", source)]), /expected one/);
+  assert.throws(() => findUsagePresentation([bundle("initial.js", source.replace("query as usage", "other as usage"))]), /export missing/);
 });
 
 test("suppresses exhausted usage upsells for mounted readers and restores the latest server result", async () => {
