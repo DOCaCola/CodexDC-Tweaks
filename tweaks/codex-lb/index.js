@@ -6,9 +6,11 @@ const { homedir } = require("node:os");
 const { basename, dirname, join } = require("node:path");
 const { parse } = require("./vendor/smol-toml.cjs");
 const { FEATURES, patchSource } = require("./features.js");
+const { discoverGates, createGateController } = require("./gates.js");
 
 const REGISTRY = Symbol.for("codexdc.codex-lb.capabilities");
 const BUNDLE_STATE = Symbol.for("codexdc.codex-lb.bundle");
+const GATE_QUEUES = Symbol.for("codexdc.codex-lb.gate-queues");
 const MAIN_BUNDLE = /[\\/]\.vite[\\/]build[\\/]main-[^\\/]+\.js$/;
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
@@ -75,6 +77,11 @@ function describe(capabilities) {
 function createRegistry({ fetch, readConfig, env, log }) {
   let confirmed = new Map();
   let generation = 0;
+  const listeners = new Set();
+
+  function signature(providers) {
+    return [...providers].sort(([a], [b]) => a.localeCompare(b)).map(([id, capabilities]) => id + ": " + describe(capabilities)).join("; ");
+  }
 
   async function refresh() {
     const run = ++generation;
@@ -102,11 +109,18 @@ function createRegistry({ fetch, readConfig, env, log }) {
         log.info("codex-lb: provider " + id + ": " + describe(capabilities));
       }
     }
+    const changed = signature(next) !== signature(confirmed);
     confirmed = next;
+    if (changed) for (const listener of listeners) listener();
   }
 
   return {
     has: (providerId, capability, model) => confirmed.get(providerId)?.get(capability)?.has(model) === true,
+    offers: (capability) => [...confirmed.values()].some((capabilities) => (capabilities.get(capability)?.size ?? 0) > 0),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     refresh,
   };
 }
@@ -165,6 +179,17 @@ function start(api) {
   });
   globalThis[REGISTRY] = registry;
 
+  // A feature's interface appears only when its main-bundle patch is in effect
+  // and a confirmed codex-lb provider offers it.
+  const gates = discoverGates(host.app.getAppPath(), FEATURES, api.log);
+  const gateController = createGateController(host, api.log, (globalThis[GATE_QUEUES] ??= new WeakMap()));
+  const updateGates = () => {
+    const applied = globalThis[BUNDLE_STATE]?.applied ?? [];
+    const enabled = [...gates].filter(([capability]) => applied.includes(capability) && registry.offers(capability));
+    void gateController.update(enabled.map(([, gate]) => gate));
+  };
+  const unsubscribe = registry.subscribe(updateGates);
+
   const refresh = () => {
     registry.refresh().catch((error) => api.log.error("codex-lb: capability refresh failed", error));
   };
@@ -179,17 +204,20 @@ function start(api) {
 
   active = () => {
     uninstallBundlePatch();
+    unsubscribe();
+    const stopped = gateController.stop();
     watcher.close();
     clearTimeout(debounce);
     clearInterval(interval);
     if (globalThis[REGISTRY] === registry) delete globalThis[REGISTRY];
+    return stopped;
   };
 }
 
 function stop() {
   const previous = active;
   active = undefined;
-  previous?.();
+  return previous?.();
 }
 
 module.exports = {

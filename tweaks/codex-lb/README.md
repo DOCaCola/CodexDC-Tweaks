@@ -20,8 +20,12 @@ codex-lb decides the model list. For composer predictions it currently offers
 only its native OpenAI models, so threads on Claude or OpenRouter models keep
 predictions off.
 
-Codex-side requirements, such as the remote prediction rollout and the
-"Show predictions" setting, still apply.
+While a codex-lb provider offers composer predictions, the tweak makes the
+"Show predictions" setting available even when OpenAI's prediction rollout has
+not reached the signed-in account. Turn the setting on to use predictions.
+OpenAI's prediction configuration still decides the prompt, the reasoning effort
+and the excluded models. Threads on the built-in `openai` provider keep OpenAI's
+rollout decision.
 
 Capabilities refresh at startup, when `config.toml` changes and every 15
 minutes. The desktop code is adjusted while it loads, so enabling the tweak takes

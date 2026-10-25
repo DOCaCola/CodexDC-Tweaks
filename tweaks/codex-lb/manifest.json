@@ -1,7 +1,7 @@
 {
   "id": "local.codex-lb",
   "name": "codex-lb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Integrates Codex desktop with codex-lb: recognizes providers served by codex-lb and enables the desktop functionality they support.",
   "scope": "main",
   "main": "index.js",
