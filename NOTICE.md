@@ -10,7 +10,7 @@ feature in [Bennett's UI Improvements](https://github.com/b-nnett/codex-plusplus
 
 The codex-lb tweak bundles [smol-toml](https://github.com/squirrelchat/smol-toml)
 1.9.1 by Squirrel Chat et al. under the BSD-3-Clause license, retained in
-`tweaks/codex-lb-capabilities/vendor/smol-toml.LICENSE`.
+`tweaks/codex-lb/vendor/smol-toml.LICENSE`.
 
 Stable `local.*` tweak IDs are retained to preserve existing settings.
 This collection is not an official OpenAI product.

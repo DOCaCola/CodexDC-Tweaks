@@ -6,9 +6,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { patchSource } = require("../tweaks/codex-lb-capabilities/features.js");
-const { customProviders, createRegistry, installBundlePatch } = require("../tweaks/codex-lb-capabilities/index.js").__test;
-const { parse } = require("../tweaks/codex-lb-capabilities/vendor/smol-toml.cjs");
+const { patchSource } = require("../tweaks/codex-lb/features.js");
+const { customProviders, createRegistry, installBundlePatch } = require("../tweaks/codex-lb/index.js").__test;
+const { parse } = require("../tweaks/codex-lb/vendor/smol-toml.cjs");
 
 const REGISTRY = Symbol.for("codexdc.codex-lb.capabilities");
 const BUNDLE_STATE = Symbol.for("codexdc.codex-lb.bundle");
@@ -157,7 +157,7 @@ test("only providers that identify as codex-lb gain capabilities, per model", as
 });
 
 test("the desktop main bundle is patched once while it loads", () => {
-  const root = mkdtempSync(join(tmpdir(), "codex-lb-capabilities-"));
+  const root = mkdtempSync(join(tmpdir(), "codex-lb-"));
   const original = (Module.prototype as any)._compile;
   delete (globalThis as any)[BUNDLE_STATE];
   try {
