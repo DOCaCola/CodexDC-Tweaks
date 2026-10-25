@@ -1,8 +1,10 @@
-# codex-lb Capabilities
+# codex-lb
 
+Integrates Codex desktop with [codex-lb](https://github.com/DOCaCola/codex-lb).
 Codex desktop enables some features only for threads on the built-in `openai`
 provider. Threads served through codex-lb use a custom provider, so those
-features stay off even though codex-lb serves them.
+features stay off even though codex-lb serves them. This tweak recognizes
+codex-lb providers and enables the functionality codex-lb advertises.
 
 This tweak asks every custom provider in `config.toml` whether it is codex-lb by
 requesting `<base_url>/codex-lb/capabilities` with the credentials Codex uses

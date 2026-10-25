@@ -8,7 +8,7 @@ Applicable upstream copyright and license are retained in LICENSE.
 Project Colors is an independent implementation inspired by the project coloring
 feature in [Bennett's UI Improvements](https://github.com/b-nnett/codex-plusplus-bennett-ui).
 
-codex-lb Capabilities bundles [smol-toml](https://github.com/squirrelchat/smol-toml)
+The codex-lb tweak bundles [smol-toml](https://github.com/squirrelchat/smol-toml)
 1.9.1 by Squirrel Chat et al. under the BSD-3-Clause license, retained in
 `tweaks/codex-lb-capabilities/vendor/smol-toml.LICENSE`.
 
