@@ -1,0 +1,15 @@
+{
+  "id": "local.codex-lb-capabilities",
+  "name": "codex-lb Capabilities",
+  "version": "0.1.0",
+  "description": "Detects custom providers served by codex-lb and enables the desktop features they support, starting with composer predictions.",
+  "scope": "main",
+  "main": "index.js",
+  "permissions": [
+    "network",
+    "filesystem"
+  ],
+  "githubRepo": "DOCaCola/CodexDC-Tweaks",
+  "author": "DOCaCola",
+  "minRuntime": ">=1.0.0"
+}

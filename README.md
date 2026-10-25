@@ -5,6 +5,7 @@ Install and update them from the **Tweak Store** inside CodexDC.
 
 | Tweak | Purpose |
 | --- | --- |
+| codex-lb Capabilities | Enable desktop features, such as composer predictions, for providers served by codex-lb |
 | Hide Get Plus Button | Hide the profile upgrade control |
 | Message Timestamps | Display message timestamps |
 | Project Colors | Color project folders, titles and Activity conversations, with presets or custom colors |
