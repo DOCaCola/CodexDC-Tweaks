@@ -1,14 +1,14 @@
 "use strict";
 
 // Desktop features that Codex restricts to threads on the built-in `openai`
-// provider. Each entry widens one restriction to providers that codex-lb
-// confirms it serves for that capability. Patterns target the installed main
-// bundle and must match exactly once; otherwise the feature stays unchanged.
+// provider. Each entry widens one restriction to threads whose provider and
+// model codex-lb confirms for that capability. Patterns target the installed
+// main bundle and must match exactly once; otherwise the feature stays unchanged.
 
 const REGISTRY_EXPRESSION = 'globalThis[Symbol.for("codexdc.codex-lb.capabilities")]';
 
-function allows(providerExpression, capability) {
-  return `${REGISTRY_EXPRESSION}?.has(${providerExpression},${JSON.stringify(capability)})===!0`;
+function allows(threadExpression, capability) {
+  return `${REGISTRY_EXPRESSION}?.has(${threadExpression}.modelProvider,${JSON.stringify(capability)},${threadExpression}.model)===!0`;
 }
 
 const FEATURES = [
@@ -19,7 +19,7 @@ const FEATURES = [
     // `openai` as unsupported_provider before a prediction fork is started.
     pattern: /(?<![$\w])([$\w]+)\.collaborationMode\?\.mode===`plan`\?([$\w]+)=`plan_mode`:\1\.modelProvider===`openai`\?/g,
     replace: (thread, reason) =>
-      `${thread}.collaborationMode?.mode===\`plan\`?${reason}=\`plan_mode\`:(${thread}.modelProvider===\`openai\`||${allows(`${thread}.modelProvider`, "composer_predictions")})?`,
+      `${thread}.collaborationMode?.mode===\`plan\`?${reason}=\`plan_mode\`:(${thread}.modelProvider===\`openai\`||${allows(thread, "composer_predictions")})?`,
   },
 ];
 

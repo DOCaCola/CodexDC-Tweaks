@@ -7,12 +7,16 @@ features stay off even though codex-lb serves them.
 This tweak asks every custom provider in `config.toml` whether it is codex-lb by
 requesting `<base_url>/codex-lb/capabilities` with the credentials Codex uses
 for that provider. A provider counts as codex-lb only when it answers with the
-codex-lb capability document. Features are then enabled per provider and per
-capability:
+codex-lb capability document. Each capability in that document lists the models
+it applies to, and a feature is enabled only for threads on one of those models:
 
 | Capability | Desktop feature |
 | --- | --- |
 | `composer_predictions` | Predicts your next message in the composer |
+
+codex-lb decides the model list. For composer predictions it currently offers
+only its native OpenAI models, so threads on Claude or OpenRouter models keep
+predictions off.
 
 Codex-side requirements, such as the remote prediction rollout and the
 "Show predictions" setting, still apply.

@@ -31,15 +31,19 @@ function withRegistry<T>(registry: unknown, run: () => T): T {
   }
 }
 
-test("prediction eligibility admits providers confirmed by codex-lb", () => {
+test("prediction eligibility admits models codex-lb confirms for the provider", () => {
   const { source, applied, skipped } = patchSource(PREDICTION_CHECK);
   assert.deepEqual(applied.map((feature: any) => feature.capability), ["composer_predictions"]);
   assert.deepEqual(skipped, []);
   const check = new Function(source + ";return D")();
-  const registry = { has: (provider: string, capability: string) => provider === "codex-lb" && capability === "composer_predictions" };
+  const registry = {
+    has: (provider: string, capability: string, model: string) =>
+      provider === "codex-lb" && capability === "composer_predictions" && ["gpt-6.1-sol", "old"].includes(model),
+  };
 
   withRegistry(registry, () => {
     assert.equal(check({ modelProvider: "codex-lb", model: "gpt-6.1-sol" }, []), "eligible");
+    assert.equal(check({ modelProvider: "codex-lb", model: "anthropic/claude-opus-5-5" }, []), "unsupported_provider");
     assert.equal(check({ modelProvider: "other", model: "gpt-6.1-sol" }, []), "unsupported_provider");
     assert.equal(check({ modelProvider: "codex-lb", model: "old" }, ["old"]), "unsupported_model");
     assert.equal(check({ modelProvider: "codex-lb", collaborationMode: { mode: "plan" } }, []), "plan_mode");
@@ -93,8 +97,12 @@ function response(status: number, body?: unknown) {
   };
 }
 
-test("only providers that identify as codex-lb gain capabilities", async () => {
-  const document = { object: "codex_lb.capabilities", service: "codex-lb", capabilities: ["composer_predictions"] };
+test("only providers that identify as codex-lb gain capabilities, per model", async () => {
+  const document = {
+    object: "codex_lb.capabilities",
+    service: "codex-lb",
+    capabilities: [{ id: "composer_predictions", models: ["gpt-6.1-sol", "gpt-6-astra"] }],
+  };
   const answers = new Map<string, () => unknown>([
     ["https://lb.example/v1/codex-lb/capabilities", () => response(200, document)],
     ["https://other.example/v1/codex-lb/capabilities", () => response(404)],
@@ -113,24 +121,38 @@ test("only providers that identify as codex-lb gain capabilities", async () => {
   });
 
   await registry.refresh();
-  assert.equal(registry.has("codex-lb", "composer_predictions"), true);
-  assert.equal(registry.has("codex-lb", "unknown"), false);
-  assert.equal(registry.has("other", "composer_predictions"), false);
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6.1-sol"), true);
+  assert.equal(registry.has("codex-lb", "composer_predictions", "anthropic/claude-opus-5-5"), false);
+  assert.equal(registry.has("codex-lb", "unknown", "gpt-6.1-sol"), false);
+  assert.equal(registry.has("other", "composer_predictions", "gpt-6.1-sol"), false);
 
   answers.set("https://lb.example/v1/codex-lb/capabilities", () => response(503));
   await registry.refresh();
-  assert.equal(registry.has("codex-lb", "composer_predictions"), true);
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6.1-sol"), true);
 
   answers.set("https://lb.example/v1/codex-lb/capabilities", () => {
     throw new TypeError("fetch failed");
   });
   await registry.refresh();
-  assert.equal(registry.has("codex-lb", "composer_predictions"), true);
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6.1-sol"), true);
+
+  answers.set("https://lb.example/v1/codex-lb/capabilities", () =>
+    response(200, { ...document, capabilities: [{ id: "composer_predictions", models: ["gpt-6-astra"] }] }),
+  );
+  await registry.refresh();
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6.1-sol"), false);
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6-astra"), true);
+
+  answers.set("https://lb.example/v1/codex-lb/capabilities", () =>
+    response(200, { ...document, capabilities: ["composer_predictions"] }),
+  );
+  await registry.refresh();
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6-astra"), false);
 
   answers.set("https://lb.example/v1/codex-lb/capabilities", () => response(200, { object: "list", data: [] }));
   await registry.refresh();
-  assert.equal(registry.has("codex-lb", "composer_predictions"), false);
-  assert.ok(log.entries.some((entry) => entry.includes("provider codex-lb: composer_predictions")));
+  assert.equal(registry.has("codex-lb", "composer_predictions", "gpt-6-astra"), false);
+  assert.ok(log.entries.some((entry) => entry.includes("provider codex-lb: composer_predictions (gpt-6-astra, gpt-6.1-sol)")));
   assert.ok(log.entries.some((entry) => entry.includes("provider codex-lb: not codex-lb")));
 });
 

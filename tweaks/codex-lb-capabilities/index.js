@@ -38,7 +38,12 @@ function customProviders(config, env) {
 
 class TransientProbeError extends Error {}
 
-// Returns the confirmed capability set, or null when the provider is not codex-lb.
+function isCapability(entry) {
+  return typeof entry?.id === "string" && Array.isArray(entry.models) && entry.models.every((model) => typeof model === "string");
+}
+
+// Returns the confirmed capabilities as a map from capability to its models, or
+// null when the provider is not codex-lb.
 // Unreachable providers and server errors are transient and keep the last answer.
 async function probeProvider(fetch, provider) {
   let response;
@@ -50,14 +55,21 @@ async function probeProvider(fetch, provider) {
   if (response.status >= 500) throw new TransientProbeError("HTTP " + response.status);
   if (!response.ok) return null;
   const document = await response.json().catch(() => null);
-  if (document?.object !== "codex_lb.capabilities" || document.service !== "codex-lb" || !Array.isArray(document.capabilities)) {
+  if (
+    document?.object !== "codex_lb.capabilities" ||
+    document.service !== "codex-lb" ||
+    !Array.isArray(document.capabilities) ||
+    !document.capabilities.every(isCapability)
+  ) {
     return null;
   }
-  return new Set(document.capabilities.filter((capability) => typeof capability === "string"));
+  return new Map(document.capabilities.map((capability) => [capability.id, new Set(capability.models)]));
 }
 
 function describe(capabilities) {
-  return capabilities == null ? "not codex-lb" : [...capabilities].sort().join(", ") || "no capabilities";
+  if (capabilities == null) return "not codex-lb";
+  const entries = [...capabilities].sort(([a], [b]) => a.localeCompare(b));
+  return entries.map(([id, models]) => id + " (" + ([...models].sort().join(", ") || "no models") + ")").join(", ") || "no capabilities";
 }
 
 function createRegistry({ fetch, readConfig, env, log }) {
@@ -94,7 +106,7 @@ function createRegistry({ fetch, readConfig, env, log }) {
   }
 
   return {
-    has: (providerId, capability) => confirmed.get(providerId)?.has(capability) === true,
+    has: (providerId, capability, model) => confirmed.get(providerId)?.get(capability)?.has(model) === true,
     refresh,
   };
 }
