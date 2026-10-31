@@ -49,16 +49,28 @@ function usageGateDeclarations(source) {
 }
 
 function usagePresentationDeclarations(source) {
-  return [...source.matchAll(
-    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
-  )].filter((match) => {
-    const end = source.indexOf("refetchIntervalInBackground:", match.index);
-    const body = source.slice(match.index, end);
+  function isUsageQuery(start) {
+    const end = source.indexOf("refetchIntervalInBackground:", start);
+    const body = source.slice(start, end);
     return end !== -1 && body.length < 7000
-      && body.includes("`base_interval_ms`")
-      && body.includes("`usage_scaling_multiplier`")
+      && /[`'"]base_interval_ms[`'"]/.test(body)
+      && /[`'"]usage_scaling_multiplier[`'"]/.test(body)
       && body.includes(".rate_limit?.allowed===!1");
-  });
+  }
+  const inline = [...source.matchAll(
+    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
+  )].filter((match) => isUsageQuery(match.index));
+  // The push-usage implementation shares a query-options factory between the
+  // automatic presentation and the separately refreshed Usage settings page.
+  // Follow only its automatic binding, never the settings or image query.
+  const factories = [...source.matchAll(
+    /function ([$\w]+)\(([$\w]+)\)\{let ([$\w]+)=\2===[`'"]usage-settings[`'"];return\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
+  )].filter((match) => isUsageQuery(match.index));
+  const factoryNames = new Set(factories.map((match) => match[1]));
+  const automatic = [...source.matchAll(
+    /([$\w]+)=[$\w]+\([$\w]+,([$\w]+)\([`'"]automatic[`'"]\)(?:,[$\w]+)?\)/g,
+  )].filter((match) => factoryNames.has(match[2]));
+  return [...inline, ...automatic];
 }
 
 function findExportedSelector(bundles, declarations, label) {

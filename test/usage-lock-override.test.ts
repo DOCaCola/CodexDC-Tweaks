@@ -150,6 +150,31 @@ test("discovers the shared usage presentation query in whichever core bundle def
   assert.throws(() => findUsagePresentation([bundle("initial.js", source.replace("query as usage", "other as usage"))]), /export missing/);
 });
 
+test("discovers the automatic usage query through its shared push-usage factory", () => {
+  const factory = "function options(mode){let settings=mode===`usage-settings`;"
+    + "return({get:g,scope:s,queryClient:c})=>{"
+    + "let interval=g(config).get(`base_interval_ms`,30000),scale=g(config).get(`usage_scaling_multiplier`,1);"
+    + "return{queryKey:key,refetchInterval:r=>r.state.data?.rate_limit?.allowed===!1?5000:interval,"
+    + "refetchIntervalInBackground:!0}}}";
+  const bindings = "var query,settings;function init(){return(init=once((()=>{"
+    + "query=querySignal(scope,options(`automatic`),subscribe),settings=querySignal(scope,options(`usage-settings`))"
+    + "})})))()}export{query as usage,settings as refresh,init as setup};";
+  const source = factory + bindings;
+  assert.deepEqual(findUsagePresentation([bundle("initial.js", source)]),
+    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
+  assert.deepEqual(findUsagePresentation([bundle("initial.js", source.replaceAll("`", "'"))]),
+    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
+  assert.throws(() => findUsagePresentation([bundle("initial.js",
+    source.replace("options(`automatic`)", "options(`usage-settings`)"))]), /expected one/);
+  assert.throws(() => findUsagePresentation([bundle("initial.js",
+    source.replace("base_interval_ms", "unrelated_interval"))]), /expected one/);
+  assert.throws(() => findUsagePresentation([
+    bundle("initial.js", source), bundle("shared.js", source),
+  ]), /expected one/);
+  assert.throws(() => findUsagePresentation([bundle("initial.js",
+    source.replace("query as usage", "other as usage"))]), /export missing/);
+});
+
 test("suppresses exhausted usage upsells for mounted readers and restores the latest server result", async () => {
   const p = page(featureClient().client);
   const { store, presentation, presentationSelector, rawUsage } = p.usage;
