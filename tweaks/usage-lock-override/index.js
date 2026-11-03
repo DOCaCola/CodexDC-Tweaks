@@ -1,129 +1,19 @@
 "use strict";
 
-const { readFileSync, readdirSync } = require("node:fs");
-const { join } = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { configureUsageLocks } = require("./usage-locks.js");
+const { findUsageModules } = require("./usage-modules.js");
 
 const STATE_KEY = "__codexdcUsageLockOverride__";
 const QUEUE_KEY = Symbol.for("codexdc.usage-lock-override.queues");
-// Codex moves code between its core startup bundles across releases. Every
-// lookup searches all of them and requires exactly one match overall.
-const CORE_BUNDLES = ["app-initial-", "app-primary-", "app-shared-"];
-
-// Discover the feature layer from the installed renderer, not a minified name
-// or a catalog response. Refuse an unsupported build rather than report success.
-function findReserveLayer(source) {
-  const matches = [...source.matchAll(
-    /[$\w]+\([$ \w]+,[`'"]([^`'"]+)[`'"],\{disableExposureLog:!0\}\)\.get\([`'"]reserve_enabled[`'"],!1\)/g,
-  )];
-  const layers = new Set(matches.map((match) => match[1]));
-  if (layers.size !== 1) {
-    throw new Error("Unsupported Codex build: expected one reserve_enabled feature layer");
-  }
-  return [...layers][0];
-}
-
-function findSidebarAlertLayers(source) {
-  const matches = [...source.matchAll(
-    /[$\w]+=\{personal:[`'"]([^`'"]+)[`'"],workspace_owner:[`'"]([^`'"]+)[`'"],workspace_member:[`'"]([^`'"]+)[`'"]\},[$\w]+=\{enabled:!1,showWithCredits:!1,exposureThresholdPercent:[\d.]+,remainingThresholdPercent:/g,
-  )];
-  if (matches.length !== 1) {
-    throw new Error("Unsupported Codex build: expected one sidebar usage-alert configuration");
-  }
-  return matches[0].slice(1);
-}
-
-function usageGateDeclarations(source) {
-  return [...source.matchAll(
-    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+\}\)=>\{/g,
-  )].filter((match) => {
-    const end = source.indexOf("})})))()}", match.index);
-    const body = source.slice(match.index, end);
-    return end !== -1 && body.length < 3000
-      && /\.authMethod!==[`'"]chatgpt[`'"]/.test(body)
-      && body.includes(".rate_limit?.allowed!==!1")
-      && body.includes(".accountId!==")
-      && body.includes(".windowMinutes===") && body.includes(".resetsAt===");
-  });
-}
-
-function usagePresentationDeclarations(source) {
-  function isUsageQuery(start) {
-    const end = source.indexOf("refetchIntervalInBackground:", start);
-    const body = source.slice(start, end);
-    return end !== -1 && body.length < 7000
-      && /[`'"]base_interval_ms[`'"]/.test(body)
-      && /[`'"]usage_scaling_multiplier[`'"]/.test(body)
-      && body.includes(".rate_limit?.allowed===!1");
-  }
-  const inline = [...source.matchAll(
-    /([$\w]+)=[$\w]+\([$\w]+,\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
-  )].filter((match) => isUsageQuery(match.index));
-  // The push-usage implementation shares a query-options factory between the
-  // automatic presentation and the separately refreshed Usage settings page.
-  // Follow only its automatic binding, never the settings or image query.
-  const factories = [...source.matchAll(
-    /function ([$\w]+)\(([$\w]+)\)\{let ([$\w]+)=\2===[`'"]usage-settings[`'"];return\(\{get:[$\w]+,scope:[$\w]+,queryClient:[$\w]+\}\)=>\{/g,
-  )].filter((match) => isUsageQuery(match.index));
-  const factoryNames = new Set(factories.map((match) => match[1]));
-  const automatic = [...source.matchAll(
-    /([$\w]+)=[$\w]+\([$\w]+,([$\w]+)\([`'"]automatic[`'"]\)(?:,[$\w]+)?\)/g,
-  )].filter((match) => factoryNames.has(match[2]));
-  return [...inline, ...automatic];
-}
-
-function findExportedSelector(bundles, declarations, label) {
-  const found = bundles.flatMap((bundle) =>
-    declarations(bundle.source).map((declaration) => ({ bundle, declaration })));
-  if (found.length !== 1) throw new Error(`Unsupported Codex build: expected one ${label}`);
-  const [{ bundle, declaration }] = found;
-  return { module: `/assets/${bundle.name}`, ...exportedSelector(bundle.source, declaration, label) };
-}
-
-function findUsageGate(bundles) {
-  return findExportedSelector(bundles, usageGateDeclarations, "shared usage-block selector");
-}
-
-function findUsagePresentation(bundles) {
-  return findExportedSelector(bundles, usagePresentationDeclarations, "shared usage presentation query");
-}
-
-function exportedSelector(source, declaration, label) {
-  const prefix = source.slice(0, declaration.index);
-  const initializer = [...prefix.matchAll(/function ([$\w]+)\(\)\{return\(/g)].at(-1)?.[1];
-  const exports = source.slice(source.lastIndexOf("export{") + 7, source.lastIndexOf("};"))
-    .split(",").map((entry) => entry.split(" as "));
-  function exported(name) {
-    const matches = exports.filter(([local]) => local === name);
-    if (matches.length !== 1) throw new Error(`Unsupported Codex build: ${label} export missing`);
-    return matches[0][1] ?? matches[0][0];
-  }
-  return { selector: exported(declaration[1]), initialize: exported(initializer) };
-}
-
-function readConfiguration(appPath) {
-  const assets = join(appPath, "webview", "assets");
-  const names = readdirSync(assets);
-  const bundles = CORE_BUNDLES.map((prefix) => {
-    const files = names.filter((name) => name.startsWith(prefix) && name.endsWith(".js"));
-    if (files.length !== 1) throw new Error(`Unsupported Codex build: expected one ${prefix} bundle`);
-    return { name: files[0], source: readFileSync(join(assets, files[0]), "utf8") };
-  });
-  const source = bundles.map((bundle) => bundle.source).join("\n");
-  return {
-    layer: findReserveLayer(source),
-    sidebarAlertLayers: findSidebarAlertLayers(source),
-    usageGate: findUsageGate(bundles),
-    usagePresentation: findUsagePresentation(bundles),
-  };
-}
 
 function isAppPage(url) {
   return /^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(url);
 }
 
-function createController(host, configuration, log, queues) {
+// Codex loads its usage modules lazily from thousands of Rspack chunks. Each
+// page discovers them in its live module runtime instead of scanning the app.
+function createController(host, log, queues) {
   const owner = randomUUID();
   const pages = new Map();
   let active = true;
@@ -132,8 +22,8 @@ function createController(host, configuration, log, queues) {
     const previous = queues.get(contents) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(async () => {
       if (contents.isDestroyed() || !isAppPage(contents.getURL()) || (enabled && !active)) return;
-      const args = JSON.stringify({ key: STATE_KEY, owner, ...configuration, enabled });
-      const result = await contents.executeJavaScript(`(${configureUsageLocks})(${args})`);
+      const args = JSON.stringify({ key: STATE_KEY, owner, enabled });
+      const result = await contents.executeJavaScript(`(${configureUsageLocks})(${args}, ${findUsageModules})`);
       if (enabled) log.info("Usage lock override", { window: contents.id, ...result });
     }).catch((error) => {
       if (!contents.isDestroyed()) log.error("Usage lock override failed", error);
@@ -178,9 +68,8 @@ function start(api) {
   // Owl is a custom Chromium host. Its Node compatibility API keeps this
   // module name; no stock Electron process or worker-thread port is assumed.
   const host = require("electron");
-  const configuration = readConfiguration(host.app.getAppPath());
   const queues = globalThis[QUEUE_KEY] ??= new WeakMap();
-  controller = createController(host, configuration, api.log, queues);
+  controller = createController(host, api.log, queues);
 }
 
 function stop() {
@@ -192,5 +81,5 @@ function stop() {
 module.exports = {
   start,
   stop,
-  __test: { findReserveLayer, findSidebarAlertLayers, findUsageGate, findUsagePresentation, readConfiguration, isAppPage, createController },
+  __test: { isAppPage, createController },
 };

@@ -1,8 +1,8 @@
 "use strict";
 
 // Serialized into the app's main JavaScript world by the Owl compatibility API.
-// Keep this function self-contained.
-async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usageGate, usagePresentation, enabled }, loadModule = (url) => import(url)) {
+// Keep this function self-contained; findUsageModules is serialized beside it.
+async function configureUsageLocks({ key, owner, enabled }, findUsageModules, loadModule = (url) => import(url)) {
   if (!/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(location.href)) {
     return { status: "skipped" };
   }
@@ -17,16 +17,23 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
   if (existing?.owner === owner) return existing.status();
   existing?.stop();
 
-  const selectors = [];
-  for (const configuration of [usageGate, usagePresentation]) {
-    const module = await loadModule(configuration.module);
-    module[configuration.initialize]();
-    const selector = module[configuration.selector];
-    if (typeof selector?.resolve !== "function" || selector.scope?.__scopeBrand !== "AppScope") {
-      throw new Error("Unsupported Codex usage selector");
-    }
-    selectors.push(selector);
+  // Each app page loads one Rspack runtime entry. Importing the page's own,
+  // already evaluated module scripts returns those instances without side effects.
+  const runtimes = [];
+  for (const script of document.querySelectorAll("script[type=module][src]")) {
+    const module = await loadModule(script.src);
+    if (typeof module.__webpack_require__ === "function") runtimes.push(module.__webpack_require__);
   }
+  const runtime = runtimes[0];
+  if (runtimes.length !== 1 || typeof runtime.m !== "object" || typeof runtime.c !== "object") {
+    throw new Error("Unsupported Codex module runtime");
+  }
+
+  const selectors = [];
+  const selectorModules = { gates: new Set(), presentations: new Set() };
+  const sidebarAlertModules = new Set();
+  const sidebarAlertLayers = new Set();
+  const scannedModules = new Set();
   const usageAtoms = new Map();
   const presentationAtoms = new Map();
   const resolvers = new Map();
@@ -112,7 +119,10 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
     };
   }
 
-  for (const [index, selector] of selectors.entries()) {
+  function hookSelector(selector, index) {
+    if (typeof selector?.resolve !== "function" || selector.scope?.__scopeBrand !== "AppScope") {
+      throw new Error("Unsupported Codex usage selector");
+    }
     const originalResolve = selector.resolve;
     const atoms = index === 0 ? usageAtoms : presentationAtoms;
     const transform = index === 0 ? () => false : suppressUsageNotices();
@@ -125,6 +135,33 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
     resolvers.set(selector, () => {
       if (selector.resolve === resolve) selector.resolve = originalResolve;
     });
+    selectors.push(selector);
+  }
+
+  // Codex loads usage modules lazily. Inspect each module once after the app
+  // has executed it, and hook the exports the app itself uses.
+  function discoverModules() {
+    const sources = [];
+    for (const id of Object.keys(runtime.c)) {
+      if (scannedModules.has(id)) continue;
+      scannedModules.add(id);
+      sources.push([id, String(runtime.m[id])]);
+    }
+    if (!sources.length) return;
+    const found = findUsageModules(sources);
+    for (const [index, kind, label] of [[0, "gates", "shared usage-block selector"], [1, "presentations", "shared usage presentation query"]]) {
+      for (const { id, name } of found[kind]) {
+        if (selectorModules[kind].size) throw new Error(`Unsupported Codex build: expected one ${label}`);
+        selectorModules[kind].add(id);
+        hookSelector(runtime.c[id].exports[name], index);
+      }
+    }
+    for (const { id, layers } of found.sidebarAlertLayers) {
+      if (sidebarAlertModules.size) throw new Error("Unsupported Codex build: expected one sidebar usage-alert configuration");
+      sidebarAlertModules.add(id);
+      for (const name of layers) sidebarAlertLayers.add(name);
+      for (const client of clients.keys()) notify(client);
+    }
   }
 
   function refreshUsageScopes() {
@@ -163,15 +200,16 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
     }
     const original = client.getLayer;
     const descriptor = Object.getOwnPropertyDescriptor(client, "getLayer");
-    const overriddenParameters = new Map([
-      [layer, "reserve_enabled"],
-      ...sidebarAlertLayers.map((name) => [name, "enabled"]),
-    ]);
     const wrappedLayers = new Map();
     let enabled = true;
+    // reserve_enabled exists only for forced Luna Reserve selection, so it is
+    // overridden on every layer without waiting for its lazy module to load.
+    function overridden(name, parameter) {
+      return parameter === "reserve_enabled" || (parameter === "enabled" && sidebarAlertLayers.has(name));
+    }
     function getLayer(name, ...args) {
       const value = Reflect.apply(original, this, [name, ...args]);
-      if (!enabled || !overriddenParameters.has(name)) return value;
+      if (!enabled) return value;
       let cache = wrappedLayers.get(name);
       if (!cache) {
         cache = new WeakMap();
@@ -182,7 +220,7 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
         wrapped = {
           ...value,
           get(parameter, ...args) {
-            if (enabled && parameter === overriddenParameters.get(name)) return false;
+            if (enabled && overridden(name, parameter)) return false;
             return Reflect.apply(value.get, value, [parameter, ...args]);
           },
         };
@@ -205,6 +243,7 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
 
   function refresh() {
     if (stopped) return;
+    discoverModules();
     if (!usageAtoms.size || !presentationAtoms.size) refreshUsageScopes();
     const registry = globalThis.__STATSIG__;
     const current = new Set(Object.values(registry?.instances ?? {}));
@@ -230,7 +269,7 @@ async function configureUsageLocks({ key, owner, layer, sidebarAlertLayers, usag
       clients: clients.size,
       usageAtoms: usageAtoms.size,
       presentationAtoms: presentationAtoms.size,
-      layer,
+      sidebarAlertLayers: sidebarAlertLayers.size,
       ...(failure ? { error: failure } : {}),
     }),
     stop() {

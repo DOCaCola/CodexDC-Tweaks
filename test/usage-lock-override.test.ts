@@ -7,14 +7,12 @@ import { atom, createStore } from "jotai/vanilla";
 
 const require = createRequire(import.meta.url);
 const { configureUsageLocks } = require("../tweaks/usage-lock-override/usage-locks.js");
-const { findReserveLayer, findSidebarAlertLayers, findUsageGate, findUsagePresentation, isAppPage, createController } =
-  require("../tweaks/usage-lock-override/index.js").__test;
+const { findUsageModules } = require("../tweaks/usage-lock-override/usage-modules.js");
+const { isAppPage, createController } = require("../tweaks/usage-lock-override/index.js").__test;
 const layerId = "2458863263";
 const sidebarAlertLayers = ["3605558075", "1385051397", "2673725514"];
 const key = "__testUsageLocks";
-const usageGate = { module: "/assets/test.js", selector: "gate", initialize: "initialize" };
-const usagePresentation = { module: "/assets/shared.js", selector: "usage", initialize: "initialize" };
-const configuration = { layer: layerId, sidebarAlertLayers, usageGate, usagePresentation };
+const runtimeUrl = "app://-/assets/348410.runtime.js";
 
 function usageResult(bannerType = "usage_limit_reached", allowed = false) {
   return {
@@ -80,99 +78,94 @@ function featureClient() {
   return { client, values, layer, calls };
 }
 
-function page(client?: ReturnType<typeof featureClient>["client"], url = "app://-/index.html") {
+// Mirrors the page's Rspack runtime: factories in m, executed modules in c.
+function moduleRuntime(usage: ReturnType<typeof usageScope>) {
+  const runtime = Object.assign(() => {}, { m: {} as Record<string, unknown>, c: {} as Record<string, unknown> });
+  function load(id: string, source: string, exports: Record<string, unknown>) {
+    runtime.m[id] = { toString: () => source };
+    runtime.c[id] = { id, exports };
+  }
+  return {
+    runtime,
+    load,
+    loadUsage() {
+      load("a6kU", gateSource, { U: usage.selector });
+      load("gPv1", presentationSource, { Ix: usage.presentationSelector });
+      load("XPat", sidebarSource, {});
+    },
+  };
+}
+
+function page(client?: ReturnType<typeof featureClient>["client"], url = "app://-/index.html", loaded = true) {
   const usage = usageScope();
+  const modules = moduleRuntime(usage);
+  if (loaded) modules.loadUsage();
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const errors: unknown[][] = [];
+  const scripts = [{ src: "app://-/assets/782259.vendor.js" }, { src: runtimeUrl }];
   const context = createContext({
     Map,
+    Set,
     location: { href: url },
-    document: { body: { querySelectorAll: () => [
-      { __reactFiber$test: { memoizedProps: { value: usage.chain } } },
-    ] } },
-    __loadModule: async () => ({ initialize() {}, gate: usage.selector, usage: usage.presentationSelector }),
+    document: {
+      querySelectorAll: (selector: string) => (assert.equal(selector, "script[type=module][src]"), scripts),
+      body: { querySelectorAll: () => [
+        { __reactFiber$test: { memoizedProps: { value: usage.chain } } },
+      ] },
+    },
+    __loadModule: async (src: string) => (src === runtimeUrl ? { __webpack_require__: modules.runtime } : {}),
     __STATSIG__: { instances: client ? { local: client } : {}, firstInstance: client },
     console: { info() {}, error: (...args: unknown[]) => errors.push(args) },
     setInterval(fn: () => void) { timers.set(++nextTimer, fn); return nextTimer; },
     clearInterval(id: number) { timers.delete(id); },
   });
   function configureArgs(args: unknown) {
-    return runInContext(`(${configureUsageLocks})(${JSON.stringify(args)}, __loadModule)`, context);
+    return runInContext(`(${configureUsageLocks})(${JSON.stringify(args)}, ${findUsageModules}, __loadModule)`, context);
   }
   function configure(enabled = true, owner = "first") {
-    return configureArgs({ key, owner, ...configuration, enabled });
+    return configureArgs({ key, owner, enabled });
   }
-  return { context, configure, configureArgs, usage, timers, errors, tick: () => [...timers.values()].forEach((fn) => fn()) };
+  return { context, configure, configureArgs, usage, modules, scripts, timers, errors,
+    tick: () => [...timers.values()].forEach((fn) => fn()) };
 }
 
-test("discovers the reserve setting independently of minified symbols and rejects ambiguity", () => {
-  const source = "function x(client){return renamed(client,`2458863263`,{disableExposureLog:!0}).get(`reserve_enabled`,!1)}";
-  assert.equal(findReserveLayer(source), layerId);
-  assert.throws(() => findReserveLayer("const versions=[]"), /Unsupported/);
-  assert.throws(() => findReserveLayer(source + source.replace(layerId, "other")), /Unsupported/);
+const gateSource = "a6kU(e,t,n){var a=n(\"y5DF\");let c=(0,a.un)(r.u,({get:e})=>{let t=e(i.PO),n=e(d.Ix).data;"
+  + "if(\"chatgpt\"!==t.authMethod||t.accountId!==t.authenticatedAccountId||n.rate_limit?.allowed!==!1)return!1;"
+  + "return w.every(({windowMinutes:e,resetsAt:t})=>r.some(n=>n.windowMinutes===e&&n.resetsAt===t))});n.d(t,{},{U:c})}";
+const presentationSource = "gPv1(e,t,n){let v=(0,s.RD)(d.u,I(\"automatic\"),_.m9),E=(0,s.RD)(d.u,I(\"usage-settings\"));"
+  + "function I(e){let t=\"usage-settings\"===e;return({get:e,scope:n,queryClient:i})=>{"
+  + "let v=h?.get(\"base_interval_ms\",3e4),E=h?.get(\"usage_scaling_multiplier\",1);"
+  + "return{refetchInterval:e=>e.state.data?.rate_limit?.allowed===!1?5e3:v,refetchIntervalInBackground:!0}}}"
+  + "n.d(t,{Os:()=>T},{Ix:v,qR:E})}";
+const sidebarSource = "XPat(e,t,n){let u={personal:\"3605558075\",workspace_owner:\"1385051397\",workspace_member:\"2673725514\"},"
+  + "d={enabled:!1,showWithCredits:!1,exposureThresholdPercent:20,remainingThresholdPercent:20};n.d(t,{Pr:()=>u})}";
+
+test("finds the shared usage gate, automatic usage query and sidebar alert layers in Rspack modules", () => {
+  assert.deepEqual(findUsageModules([
+    ["gate", gateSource], ["usage", presentationSource], ["alerts", sidebarSource], ["other", "x(e,t,n){n.d(t,{a:()=>b})}"],
+  ]), {
+    gates: [{ id: "gate", name: "U" }],
+    presentations: [{ id: "usage", name: "Ix" }],
+    sidebarAlertLayers: [{ id: "alerts", layers: sidebarAlertLayers }],
+  });
+  assert.deepEqual(findUsageModules([["usage", presentationSource.replaceAll("\"", "\x60")]]).presentations,
+    [{ id: "usage", name: "Ix" }]);
 });
 
-test("discovers personal and workspace sidebar alert layers without minified names", () => {
-  const source = "renamed={personal:`3605558075`,workspace_owner:`1385051397`,workspace_member:`2673725514`},"
-    + "defaults={enabled:!1,showWithCredits:!1,exposureThresholdPercent:20,remainingThresholdPercent:20}";
-  assert.deepEqual(findSidebarAlertLayers(source), sidebarAlertLayers);
-  assert.throws(() => findSidebarAlertLayers(""), /Unsupported/);
-  assert.throws(() => findSidebarAlertLayers(source + source), /expected one/);
+test("ignores the settings usage query, unrelated gates and incomplete usage queries", () => {
+  const empty = { gates: [], presentations: [], sidebarAlertLayers: [] };
+  assert.deepEqual(findUsageModules([
+    ["settings", presentationSource.replace("I(\"automatic\")", "I(\"usage-settings\")")],
+    ["interval", presentationSource.replace("base_interval_ms", "unrelated_interval")],
+    ["gate", gateSource.replace(".resetsAt===", ".endsAt===")],
+    ["auth", gateSource.replace("\"chatgpt\"!==t.authMethod", "t.signedIn")],
+  ]), empty);
 });
 
-const bundle = (name: string, source: string) => ({ name, source });
-
-test("discovers the exported shared usage gate and rejects missing or ambiguous gates", () => {
-  const source = "var lock;function init(){return(init=once((()=>{lock=derived(scope,({get:g})=>{"
-    + "let a=g(auth),q=g(quota).data;"
-    + "if(a.authMethod!==`chatgpt`||a.accountId!==a.authenticatedAccountId||q.rate_limit?.allowed!==!1)return!1;"
-    + "return windows.some(w=>w.windowMinutes===1&&w.resetsAt===2)"
-    + "})})))()}export{lock as gate,init as setup};";
-  assert.deepEqual(findUsageGate([bundle("primary.js", source)]),
-    { module: "/assets/primary.js", selector: "gate", initialize: "setup" });
-  assert.throws(() => findUsageGate([bundle("primary.js", "export{};")]), /expected one/);
-  assert.throws(() => findUsageGate([bundle("primary.js", source + source)]), /expected one/);
-  assert.throws(() => findUsageGate([bundle("primary.js", source.replace("lock as gate", "other as gate"))]), /export missing/);
-});
-
-test("discovers the shared usage presentation query in whichever core bundle defines it", () => {
-  const source = "var query;function init(){return(init=once((()=>{"
-    + "query=querySignal(scope,({get:g,scope:s,queryClient:c})=>{"
-    + "let interval=g(config).get(`base_interval_ms`,30000),scale=g(config).get(`usage_scaling_multiplier`,1);"
-    + "return{queryKey:key,refetchInterval:r=>r.state.data?.rate_limit?.allowed===!1?5000:interval,"
-    + "refetchIntervalInBackground:!0}})})))()}export{query as usage,init as setup};";
-  const other = bundle("shared.js", "export{};");
-  assert.deepEqual(findUsagePresentation([other, bundle("initial.js", source)]),
-    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
-  assert.throws(() => findUsagePresentation([other]), /expected one/);
-  assert.throws(() => findUsagePresentation([bundle("shared.js", source), bundle("initial.js", source)]), /expected one/);
-  assert.throws(() => findUsagePresentation([bundle("initial.js", source.replace("query as usage", "other as usage"))]), /export missing/);
-});
-
-test("discovers the automatic usage query through its shared push-usage factory", () => {
-  const factory = "function options(mode){let settings=mode===`usage-settings`;"
-    + "return({get:g,scope:s,queryClient:c})=>{"
-    + "let interval=g(config).get(`base_interval_ms`,30000),scale=g(config).get(`usage_scaling_multiplier`,1);"
-    + "return{queryKey:key,refetchInterval:r=>r.state.data?.rate_limit?.allowed===!1?5000:interval,"
-    + "refetchIntervalInBackground:!0}}}";
-  const bindings = "var query,settings;function init(){return(init=once((()=>{"
-    + "query=querySignal(scope,options(`automatic`),subscribe),settings=querySignal(scope,options(`usage-settings`))"
-    + "})})))()}export{query as usage,settings as refresh,init as setup};";
-  const source = factory + bindings;
-  assert.deepEqual(findUsagePresentation([bundle("initial.js", source)]),
-    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
-  assert.deepEqual(findUsagePresentation([bundle("initial.js", source.replaceAll("`", "'"))]),
-    { module: "/assets/initial.js", selector: "usage", initialize: "setup" });
-  assert.throws(() => findUsagePresentation([bundle("initial.js",
-    source.replace("options(`automatic`)", "options(`usage-settings`)"))]), /expected one/);
-  assert.throws(() => findUsagePresentation([bundle("initial.js",
-    source.replace("base_interval_ms", "unrelated_interval"))]), /expected one/);
-  assert.throws(() => findUsagePresentation([
-    bundle("initial.js", source), bundle("shared.js", source),
-  ]), /expected one/);
-  assert.throws(() => findUsagePresentation([bundle("initial.js",
-    source.replace("query as usage", "other as usage"))]), /export missing/);
+test("fails explicitly when a matching selector is not exported", () => {
+  assert.throws(() => findUsageModules([["gate", gateSource.replace("{U:c}", "{U:other}")]]), /usage-block selector export missing/);
+  assert.throws(() => findUsageModules([["usage", presentationSource.replace("Ix:v,", "")]]), /presentation query export missing/);
 });
 
 test("suppresses exhausted usage upsells for mounted readers and restores the latest server result", async () => {
@@ -348,12 +341,14 @@ test("enabling updates subscribed selectors immediately and restores current ser
   const cachedAlerts = sidebarAlertLayers.map(name => client.getLayer(name));
   for (const alertLayer of cachedAlerts) {
     assert.equal(alertLayer.get("enabled", true), false);
-    assert.equal(alertLayer.get("reserve_enabled", false), true);
+    assert.equal(alertLayer.get("reserve_enabled", true), false);
     assert.equal(alertLayer.get("other_setting", 0), 17);
   }
   assert.equal(values.enabled, true);
   assert.equal(client.getLayer(layerId).get("enabled", false), true);
-  assert.equal(client.getLayer("unrelated"), layer);
+  const unrelated = client.getLayer("unrelated");
+  assert.equal(unrelated.get("enabled", false), true);
+  assert.equal(unrelated.get("reserve_enabled", true), false);
   assert.equal(client.getLayer(layerId).get("other_setting", 0), 17);
   assert.equal(calls.some((call) => call[1] === options), true);
   const cached = client.getLayer(layerId);
@@ -406,6 +401,44 @@ test("an old stop cannot disable a replacement instance or another wrapper", asy
   assert.equal(client.getLayer(layerId).get("reserve_enabled", false), true);
 });
 
+test("hooks usage modules when Codex loads them lazily", async () => {
+  const { client } = featureClient();
+  const p = page(client, "app://-/index.html", false);
+  const waiting = await p.configure();
+  assert.deepEqual([waiting.status, waiting.usageAtoms, waiting.sidebarAlertLayers], ["waiting", 0, 0]);
+  assert.equal(client.getLayer(layerId).get("reserve_enabled", true), false);
+  assert.equal(client.getLayer(sidebarAlertLayers[0]).get("enabled", false), true);
+  assert.equal(p.usage.store.get(p.usage.blocked), true);
+  p.modules.loadUsage();
+  p.tick();
+  assert.equal((await p.configure()).status, "active");
+  assert.equal(p.usage.store.get(p.usage.blocked), false);
+  for (const name of sidebarAlertLayers) assert.equal(client.getLayer(name).get("enabled", true), false);
+  await p.configure(false);
+  assert.equal(p.usage.store.get(p.usage.blocked), true);
+  assert.equal(client.getLayer(sidebarAlertLayers[0]).get("enabled", false), true);
+});
+
+test("stops and restores the app when a second usage gate appears", async () => {
+  const p = page(featureClient().client);
+  await p.configure();
+  p.modules.load("other", gateSource, { U: usageScope().selector });
+  p.tick();
+  const status = await p.configure();
+  assert.equal(status.status, "failed");
+  assert.match(status.error, /expected one shared usage-block selector/);
+  assert.equal(p.usage.store.get(p.usage.blocked), true);
+});
+
+test("requires exactly one Rspack runtime entry in the page", async () => {
+  const p = page(featureClient().client);
+  p.scripts.pop();
+  await assert.rejects(() => p.configure(), /Unsupported Codex module runtime/);
+  p.scripts.push({ src: runtimeUrl }, { src: runtimeUrl });
+  await assert.rejects(() => p.configure(), /Unsupported Codex module runtime/);
+  assert.equal(p.context[key], undefined);
+});
+
 test("never runs on embedded websites and fails explicitly for unsupported clients", async () => {
   for (const url of ["https://chatgpt.com", "app://-/other.html", "app://evil/index.html", "about:blank"]) {
     assert.equal(isAppPage(url), false);
@@ -443,7 +476,8 @@ class Contents extends EventEmitter {
   getURL() { return this.page.context.location.href; }
   isDestroyed() { return this.destroyed; }
   async executeJavaScript(source: string) {
-    return this.page.configureArgs(JSON.parse(source.slice(source.lastIndexOf(")(") + 2, -1)));
+    assert.match(source, /, function findUsageModules\(modules\)/);
+    return this.page.configureArgs(JSON.parse(/\)\((\{[^{}]*\}), function findUsageModules/.exec(source)![1]));
   }
 }
 
@@ -455,7 +489,7 @@ test("host lifecycle covers existing/new app windows, navigation and stop/start 
   const queues = new WeakMap();
   const errors: unknown[] = [];
   const log = { info() {}, error: (...args: unknown[]) => errors.push(args) };
-  const old = createController(host, configuration, log, queues);
+  const old = createController(host, log, queues);
   await queues.get(first);
   assert.equal(first.page.timers.size, 1);
   assert.equal(browser.page.timers.size, 0);
@@ -465,7 +499,7 @@ test("host lifecycle covers existing/new app windows, navigation and stop/start 
   await queues.get(added);
   assert.equal(added.page.timers.size, 1);
   const stopping = old.stop();
-  const next = createController(host, configuration, log, queues);
+  const next = createController(host, log, queues);
   await stopping;
   await queues.get(first);
   assert.equal(first.page.timers.size, 1);
