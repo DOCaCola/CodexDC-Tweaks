@@ -90,26 +90,37 @@ function activityThread(doc: Document, id: string, projectId: string | null, kin
   return node;
 }
 
-function recentThread(doc: Document, id: string, projectId: string | null) {
+// Recents and pinned rows sit outside project lists. Codex resolves each
+// thread's home container in the sidebar provider above the row's entry.
+function recentThread(doc: Document, id: string, projectId: string | null, { remote = false, pinned = false } = {}) {
   const node = activityThread(doc, id, null);
+  node.setAttribute("data-app-action-sidebar-thread-pinned", String(pinned));
+  const threadId = `thread-${id}`;
+  const entry = remote ? { kind: "remote", key: id, task: { id: threadId } } : { kind: "local", key: id, conversationId: threadId };
+  const home = projectId == null ? "chats" : `project:${projectId}`;
   (node as any).testFiber = {
     memoizedProps: { "data-app-action-sidebar-thread-id": id },
-    return: { memoizedProps: { hoverCardProjectId: projectId, hoverCardProjectLabel: "Same name" }, return: null },
+    return: {
+      memoizedProps: { entry },
+      return: { memoizedProps: { homeContainerIdByThreadId: new Map([[threadId, home]]) }, return: null },
+    },
   };
   return node;
 }
 
-test("Recents inherit saved project colors without Activity metadata or mounted project headings", async () => {
+test("Recents and pinned threads inherit saved project colors without mounted project headings", async () => {
   const h = setup({ projectColors: { [key("/work/one")]: "#1256ab", [key("ssh", "remote")]: "purple" } });
   try {
     h.first.group.remove();
     const recent = recentThread(h.doc, "local:recent", "/work/one");
-    const remote = recentThread(h.doc, "local:ssh", "ssh");
+    const pinned = recentThread(h.doc, "local:pinned", "/work/one", { pinned: true });
+    const remote = recentThread(h.doc, "remote:ssh", "ssh", { remote: true });
     const projectless = recentThread(h.doc, "local:projectless", null);
-    h.sidebar.append(recent, remote, projectless);
+    h.sidebar.append(recent, pinned, remote, projectless);
     await h.settle();
     assert.equal(recent.getAttribute(colorAttr), "custom");
     assert.equal(recent.style.getPropertyValue("--codexdc-project-accent"), "#1256ab");
+    assert.equal(pinned.getAttribute(colorAttr), "custom");
     assert.equal(remote.getAttribute(colorAttr), "purple");
     assert.equal(projectless.hasAttribute(colorAttr), false);
     h.stored.projectColors = { [key("/work/one")]: "auto", [key("ssh", "remote")]: "green" };

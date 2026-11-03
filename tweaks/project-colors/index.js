@@ -23,19 +23,30 @@ const TINT_KEY = "tintBackgrounds";
 const isCustom = color => /^#[0-9a-f]{6}$/i.test(color);
 
 function conversationProject(api, node, projectsById) {
-  // Activity carries a full project group; Recents uses hover-card project IDs.
+  // Activity carries a full project group. Recents and pinned rows leave their
+  // project's list, so read the home container Codex resolved for the thread.
   // Read identities, never displayed project names or minified component names.
-  let projectId = null;
+  const threadKey = node.getAttribute("data-app-action-sidebar-thread-id");
+  let threadId = null;
   for (let fiber = api.react.getFiber(node); fiber; fiber = fiber.return) {
     const props = fiber.memoizedProps;
     const group = props?.projectGroup ?? props?.secondaryContent?.props?.projectGroup;
     if (group?.projectId != null && group.projectKind != null) {
       return JSON.stringify([group.projectKind, group.projectId]);
     }
-    projectId ??= props?.hoverCardProjectId;
+    const entry = props?.entry;
+    if (threadId === null && entry?.key === threadKey) {
+      threadId = entry.kind === "remote" ? entry.task.id : entry.conversationId;
+    }
+    const homes = props?.homeContainerIdByThreadId;
+    if (homes instanceof Map) {
+      const home = homes.get(threadId);
+      if (!home?.startsWith("project:")) return null;
+      const matches = projectsById.get(home.slice("project:".length));
+      return matches?.size === 1 ? matches.values().next().value : null;
+    }
   }
-  const matches = projectsById.get(projectId);
-  return matches?.size === 1 ? matches.values().next().value : null;
+  return null;
 }
 
 function automaticColor(key) {
