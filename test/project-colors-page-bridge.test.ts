@@ -4,7 +4,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 
 const require = createRequire(import.meta.url);
-const { installPicker } = require("../tweaks/project-colors/native-picker.js");
+const { installPageBridge } = require("../tweaks/project-colors/page-bridge.js");
 
 // A page-shaped Rspack runtime: React and react-dom/client are loaded, while
 // Appearance settings and the color picker arrive through a lazy import.
@@ -41,7 +41,7 @@ function fakeRuntime({ React, Client, site = true }: { React: any, Client: any, 
 function page(body: string) {
   const dom = new JSDOM('<head><script type="module" src="https://app.test/entry.js"></script></head><body>' + body + "</body>",
     { runScripts: "outside-only" });
-  const install = dom.window.eval("(" + installPicker.toString() + ")");
+  const install = dom.window.eval("(" + installPageBridge.toString() + ")");
   const settle = () => new Promise(resolve => dom.window.setTimeout(resolve, 0));
   return { dom, install, settle };
 }
@@ -178,5 +178,54 @@ test("native dropdown bridge sends selections, preserves its root and uses the d
     assert.equal(tree.children[0].children[0].props.value, "custom");
     await install(false);
     assert.equal(unmounts, 1);
+  } finally { dom.window.close(); }
+});
+
+// Fiber chains as React builds them above sidebar rows: Activity rows carry
+// their project group; Recents and pinned rows reach the sidebar provider's
+// home container map above their entry, beyond isolated-world snapshots.
+test("page bridge answers thread projects from Activity groups and the sidebar's home containers", async () => {
+  const { dom, install } = page("");
+  const doc = dom.window.document;
+  function row(id: string, fiber: any) {
+    const node = doc.createElement("div");
+    node.setAttribute("data-app-action-sidebar-thread-row", "");
+    node.setAttribute("data-app-action-sidebar-thread-id", id);
+    (node as any)["__reactFiber$test"] = fiber;
+    doc.body.append(node);
+    return node;
+  }
+  const homes = new dom.window.Map([
+    ["pinned-id", "project:dokiq"], ["remote-id", "project:ssh"], ["chat-id", "chats"],
+  ]);
+  const provider = { memoizedProps: { homeContainerIdByThreadId: homes }, return: null };
+  const below = (entry: any) => {
+    let fiber: any = { memoizedProps: { homeContainerIdByThreadId: homes }, return: null };
+    for (let depth = 0; depth < 80; depth++) fiber = { memoizedProps: { depth }, return: fiber };
+    return { memoizedProps: {}, return: { memoizedProps: { entry }, return: fiber } };
+  };
+  const ask = (node: Element) => {
+    node.dispatchEvent(new dom.window.Event("codexdc:project-color-thread"));
+    return JSON.parse(node.getAttribute("data-codexdc-project-thread")!);
+  };
+  try {
+    let announced = 0;
+    doc.addEventListener("codexdc:project-colors-bridge", () => { announced++; });
+    await install(true, async () => { throw new Error("Thread lookups load no modules"); });
+    assert.equal(announced, 1);
+    const activity = row("local:a", { memoizedProps: { secondaryContent: { props: { projectGroup: { projectId: "p", projectKind: "remote" } } } }, return: provider });
+    const pinned = row("local:pinned", below({ kind: "local", key: "local:pinned", conversationId: "pinned-id" }));
+    const remote = row("remote:r", below({ kind: "remote", key: "remote:r", task: { id: "remote-id" } }));
+    const chat = row("local:chat", below({ kind: "local", key: "local:chat", conversationId: "chat-id" }));
+    const pending = row("local:pending", below({ kind: "local", key: "local:pending", conversationId: null }));
+    assert.deepEqual(ask(activity), ["remote", "p"]);
+    assert.deepEqual(ask(pinned), [null, "dokiq"]);
+    assert.deepEqual(ask(remote), [null, "ssh"]);
+    assert.equal(ask(chat), null);
+    assert.equal(ask(pending), null);
+    await install(false);
+    pinned.removeAttribute("data-codexdc-project-thread");
+    pinned.dispatchEvent(new dom.window.Event("codexdc:project-color-thread"));
+    assert.equal(pinned.hasAttribute("data-codexdc-project-thread"), false);
   } finally { dom.window.close(); }
 });

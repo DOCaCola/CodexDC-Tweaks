@@ -8,6 +8,7 @@ const TINT = "data-codexdc-project-tint";
 const TITLE = "data-codexdc-project-color-header";
 const THREAD = "[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-id]";
 const CONVERSATION = "data-codexdc-project-conversation-color";
+const PROJECT_THREAD = "data-codexdc-project-thread";
 const PALETTE = [
   ["blue", "Blue", "var(--color-chart-blue)"],
   ["green", "Green", "var(--color-chart-green)"],
@@ -22,31 +23,19 @@ const COLORS_KEY = "projectColors";
 const TINT_KEY = "tintBackgrounds";
 const isCustom = color => /^#[0-9a-f]{6}$/i.test(color);
 
-function conversationProject(api, node, projectsById) {
-  // Activity carries a full project group. Recents and pinned rows leave their
-  // project's list, so read the home container Codex resolved for the thread.
-  // Read identities, never displayed project names or minified component names.
-  const threadKey = node.getAttribute("data-app-action-sidebar-thread-id");
-  let threadId = null;
-  for (let fiber = api.react.getFiber(node); fiber; fiber = fiber.return) {
-    const props = fiber.memoizedProps;
-    const group = props?.projectGroup ?? props?.secondaryContent?.props?.projectGroup;
-    if (group?.projectId != null && group.projectKind != null) {
-      return JSON.stringify([group.projectKind, group.projectId]);
-    }
-    const entry = props?.entry;
-    if (threadId === null && entry?.key === threadKey) {
-      threadId = entry.kind === "remote" ? entry.task.id : entry.conversationId;
-    }
-    const homes = props?.homeContainerIdByThreadId;
-    if (homes instanceof Map) {
-      const home = homes.get(threadId);
-      if (!home?.startsWith("project:")) return null;
-      const matches = projectsById.get(home.slice("project:".length));
-      return matches?.size === 1 ? matches.values().next().value : null;
-    }
-  }
-  return null;
+function conversationProject(node, projectsById) {
+  // The main-world page bridge reads the row's project identity from live
+  // React state and answers synchronously through an attribute. Activity rows
+  // report their project kind; Recents and pinned rows report the bare ID of
+  // the thread's home project. Never read displayed project names.
+  node.dispatchEvent(new node.ownerDocument.defaultView.Event("codexdc:project-color-thread"));
+  const project = JSON.parse(node.getAttribute(PROJECT_THREAD) ?? "null");
+  node.removeAttribute(PROJECT_THREAD);
+  if (!project) return null;
+  const [kind, id] = project;
+  if (kind !== null) return JSON.stringify([kind, id]);
+  const matches = projectsById.get(id);
+  return matches?.size === 1 ? matches.values().next().value : null;
 }
 
 function automaticColor(key) {
@@ -184,7 +173,7 @@ function createProjectColors(api, doc) {
     for (const row of rows.values()) paint(row);
     const projects = projectIdentities();
     for (const [node] of conversations) {
-      const key = conversationProject(api, node, projects);
+      const key = conversationProject(node, projects);
       conversations.set(node, key);
       paintConversation(node, key);
     }
@@ -242,7 +231,7 @@ function createProjectColors(api, doc) {
     const projects = projectIdentities();
     for (const node of dirtyConversations) {
       if (!node.isConnected || !node.matches(THREAD) || !node.closest(SIDEBAR) || node.closest(GROUP)) continue;
-      const key = conversationProject(api, node, projects);
+      const key = conversationProject(node, projects);
       conversations.set(node, key);
       paintConversation(node, key);
     }
@@ -689,6 +678,8 @@ function createProjectColors(api, doc) {
     renderSettings();
   }
   win.addEventListener("storage", syncStorage);
+  // The main process installs the page bridge on its own schedule.
+  doc.addEventListener("codexdc:project-colors-bridge", repaint);
   const unregister = api.settings.register({
     id: "project-colors", title: "Project Colors",
     render(root) {
@@ -709,6 +700,7 @@ function createProjectColors(api, doc) {
       doc.removeEventListener("click", rememberProject, true);
       doc.removeEventListener("pointerdown", rememberProject, true);
       win.removeEventListener("storage", syncStorage);
+      doc.removeEventListener("codexdc:project-colors-bridge", repaint);
       unregister.unregister();
       dialog?.remove();
       for (const [button, cleanup] of menus) { cleanup(); button.remove(); }
@@ -728,7 +720,7 @@ let controller;
 module.exports = {
   start(api) {
     controller = api.process === "main"
-      ? require("./native-picker.js").startPickerHost(api)
+      ? require("./page-bridge.js").startPageBridge(api)
       : createProjectColors(api, document);
   },
   stop() { controller?.stop(); controller = null; },

@@ -46,8 +46,13 @@ function setup(stored: Record<string, unknown> = {}) {
   let scheduled = 0;
   const raf = dom.window.requestAnimationFrame.bind(dom.window);
   dom.window.requestAnimationFrame = callback => { scheduled++; return raf(callback); };
+  // Emulate the main-world page bridge, which answers from live React state.
+  let bridge = true;
+  doc.addEventListener("codexdc:project-color-thread", event => {
+    const row = event.target as any;
+    if (bridge) row.setAttribute("data-codexdc-project-thread", JSON.stringify(row.testProject ?? null));
+  }, true);
   const api = {
-    react: { getFiber: (node: any) => node.testFiber ?? null },
     storage: {
       get: (name: string, fallback: unknown) => stored[name] ?? fallback,
       set: (name: string, value: unknown) => { stored[name] = value; },
@@ -73,7 +78,8 @@ function setup(stored: Record<string, unknown> = {}) {
     select.dispatchEvent(new dom.window.Event("codexdc:project-color-selection"));
   };
   const cleanup = () => { controller.stop(); dom.window.close(); };
-  return { dom, doc, sidebar, first, controller, stored, settle, settings, selectColor, cleanup, scheduled: () => scheduled, unregistered: () => unregistered };
+  const setBridge = (value: boolean) => { bridge = value; };
+  return { dom, doc, sidebar, first, controller, stored, settle, settings, selectColor, cleanup, setBridge, scheduled: () => scheduled, unregistered: () => unregistered };
 }
 
 function activityThread(doc: Document, id: string, projectId: string | null, kind = "local") {
@@ -81,30 +87,16 @@ function activityThread(doc: Document, id: string, projectId: string | null, kin
   node.setAttribute("data-app-action-sidebar-thread-row", "");
   node.setAttribute("data-app-action-sidebar-thread-id", id);
   node.innerHTML = '<span data-thread-title>Conversation</span><span>Running</span>';
-  (node as any).testFiber = {
-    memoizedProps: { secondaryContent: { props: {
-      projectGroup: projectId == null ? null : { projectId, projectKind: kind },
-    } } },
-    return: null,
-  };
+  (node as any).testProject = projectId == null ? null : [kind, projectId];
   return node;
 }
 
-// Recents and pinned rows sit outside project lists. Codex resolves each
-// thread's home container in the sidebar provider above the row's entry.
-function recentThread(doc: Document, id: string, projectId: string | null, { remote = false, pinned = false } = {}) {
+// Recents and pinned rows sit outside project lists. The bridge reports only
+// the bare ID of the thread's home project.
+function recentThread(doc: Document, id: string, projectId: string | null, { pinned = false } = {}) {
   const node = activityThread(doc, id, null);
   node.setAttribute("data-app-action-sidebar-thread-pinned", String(pinned));
-  const threadId = `thread-${id}`;
-  const entry = remote ? { kind: "remote", key: id, task: { id: threadId } } : { kind: "local", key: id, conversationId: threadId };
-  const home = projectId == null ? "chats" : `project:${projectId}`;
-  (node as any).testFiber = {
-    memoizedProps: { "data-app-action-sidebar-thread-id": id },
-    return: {
-      memoizedProps: { entry },
-      return: { memoizedProps: { homeContainerIdByThreadId: new Map([[threadId, home]]) }, return: null },
-    },
-  };
+  (node as any).testProject = projectId == null ? null : [null, projectId];
   return node;
 }
 
@@ -114,7 +106,7 @@ test("Recents and pinned threads inherit saved project colors without mounted pr
     h.first.group.remove();
     const recent = recentThread(h.doc, "local:recent", "/work/one");
     const pinned = recentThread(h.doc, "local:pinned", "/work/one", { pinned: true });
-    const remote = recentThread(h.doc, "remote:ssh", "ssh", { remote: true });
+    const remote = recentThread(h.doc, "remote:ssh", "ssh");
     const projectless = recentThread(h.doc, "local:projectless", null);
     h.sidebar.append(recent, pinned, remote, projectless);
     await h.settle();
@@ -128,6 +120,22 @@ test("Recents and pinned threads inherit saved project colors without mounted pr
     assert.equal(recent.getAttribute(colorAttr), automaticColor(key("/work/one")));
     assert.equal(remote.getAttribute(colorAttr), "green");
     assert.equal(recent.style.getPropertyValue("--codexdc-project-accent"), "");
+  } finally { h.cleanup(); }
+});
+
+test("Conversations resolve once the main-world page bridge arrives after the renderer", async () => {
+  const h = setup({ projectColors: { [key("/work/one")]: "green" } });
+  try {
+    h.setBridge(false);
+    const pinned = recentThread(h.doc, "local:pinned", "/work/one", { pinned: true });
+    h.sidebar.append(pinned);
+    await h.settle();
+    assert.equal(pinned.hasAttribute(colorAttr), false);
+    assert.equal(pinned.hasAttribute("data-codexdc-project-thread"), false);
+    h.setBridge(true);
+    h.doc.dispatchEvent(new h.dom.window.Event("codexdc:project-colors-bridge"));
+    assert.equal(pinned.getAttribute(colorAttr), "green");
+    assert.equal(pinned.hasAttribute("data-codexdc-project-thread"), false, "Bridge answers are consumed");
   } finally { h.cleanup(); }
 });
 
@@ -152,9 +160,7 @@ test("Recents acquire newly chosen colors and avoid ambiguous local/remote proje
     h.sidebar.append(remoteProject.group);
     await h.settle();
     assert.equal(collision.hasAttribute(colorAttr), false, "A bare ID cannot distinguish projects of different kinds");
-    (collision as any).testFiber.return.memoizedProps.secondaryContent = {
-      props: { projectGroup: { projectId: "shared", projectKind: "local" } },
-    };
+    (collision as any).testProject = ["local", "shared"];
     collision.setAttribute("data-app-action-sidebar-thread-id", "local:resolved");
     await h.settle();
     assert.equal(collision.getAttribute(colorAttr), "red");
@@ -176,11 +182,11 @@ test("Activity conversations use project identities without needing mounted proj
     assert.equal(collision.hasAttribute(colorAttr), false);
     assert.equal(projectless.hasAttribute(colorAttr), false);
     // A virtualized/reused row changes project while retaining the same node.
-    (local as any).testFiber.memoizedProps.secondaryContent.props.projectGroup = { projectId: "same", projectKind: "remote" };
+    (local as any).testProject = ["remote", "same"];
     local.setAttribute("data-app-action-sidebar-thread-id", "local:new");
     await h.settle();
     assert.equal(local.getAttribute(colorAttr), "pink");
-    (local as any).testFiber.memoizedProps.secondaryContent.props.projectGroup = null;
+    (local as any).testProject = null;
     local.querySelector("[data-thread-title]")!.textContent = "Moved out of project";
     await h.settle();
     assert.equal(local.hasAttribute(colorAttr), false);

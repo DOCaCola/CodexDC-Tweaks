@@ -36,8 +36,9 @@ The report has no trace or confirmed cause. This implementation uses sidebar
 attributes and CSS, without layout measurements during recoloring. Its observer
 ignores animation style/class changes and conversation additions inside project groups.
 
-Activity membership uses each row's project group through the React props
-bridge. Recents and pinned conversations use the home project the sidebar
+Conversation membership is read by the same main-world bridge from live React
+state, which the renderer's isolated world cannot reach. Activity rows use their
+project group. Recents and pinned conversations use the home project the sidebar
 resolved for the thread, so chats Codex keeps outside projects stay uncolored
 even when their folder matches a project. Those project IDs resolve against
 known project identities; ambiguous IDs shared by different project kinds stay

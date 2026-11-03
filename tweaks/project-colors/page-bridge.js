@@ -1,18 +1,52 @@
 "use strict";
 
 // Serialized by the host into the app page's main world. Keep self-contained.
-// Codex lazy-loads its Appearance settings from Rspack chunks. On first use the
-// page loads them through its own module runtime and reuses their accent
-// dropdown and HexColorPicker components. Modules are found by semantic source
-// and export shape, never by build hashes or module IDs.
-async function installPicker(enabled, loadModule = url => import(url)) {
-  const key = "__codexdcProjectColorPicker__";
+// The renderer half runs in the preload's isolated world, which sees neither
+// live React fibers nor the app's modules. This bridge answers its requests:
+//
+// - Thread projects. Recents and pinned rows sit outside their project's list.
+//   The sidebar resolves each thread's home container (a Map high above the
+//   row), which the isolated world's fiber snapshots cannot reach.
+// - Color controls. Codex lazy-loads its Appearance settings from Rspack
+//   chunks. On first use the page loads them through its own module runtime
+//   and reuses their accent dropdown and HexColorPicker components. Modules
+//   are found by semantic source and export shape, never by build hashes.
+async function installPageBridge(enabled, loadModule = url => import(url)) {
+  const key = "__codexdcProjectColors__";
   globalThis[key]?.stop();
   delete globalThis[key];
   if (!enabled) return;
   const roots = new Map();
   let active = true;
   let components;
+
+  // Answers [projectKind | null, projectId] or null. Activity rows carry their
+  // full project group; other rows report the sidebar's resolved home project.
+  function threadProject(row) {
+    const threadKey = row.getAttribute("data-app-action-sidebar-thread-id");
+    const fiberKey = Object.getOwnPropertyNames(row).find(name => name.startsWith("__reactFiber$"));
+    let threadId = null;
+    for (let fiber = row[fiberKey]; fiber; fiber = fiber.return) {
+      const props = fiber.memoizedProps;
+      const group = props?.projectGroup ?? props?.secondaryContent?.props?.projectGroup;
+      if (group?.projectId != null && group.projectKind != null) return [group.projectKind, group.projectId];
+      const entry = props?.entry;
+      if (threadId === null && entry?.key === threadKey) {
+        threadId = entry.kind === "remote" ? entry.task.id : entry.conversationId;
+      }
+      const homes = props?.homeContainerIdByThreadId;
+      if (homes instanceof Map) {
+        const home = homes.get(threadId);
+        return home?.startsWith("project:") ? [null, home.slice("project:".length)] : null;
+      }
+    }
+    return null;
+  }
+  const onThread = event => {
+    const row = event.target;
+    if (!(row instanceof Element) || !row.matches("[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-id]")) return;
+    row.setAttribute("data-codexdc-project-thread", JSON.stringify(threadProject(row)));
+  };
 
   // Rspack defines exports as n.d(exports,{name:()=>local},{name:local}).
   function exportsOf(source) {
@@ -165,31 +199,35 @@ async function installPicker(enabled, loadModule = url => import(url)) {
   };
   document.addEventListener("codexdc:project-color-picker", onRequest);
   document.addEventListener("codexdc:project-color-select", onRequest);
+  document.addEventListener("codexdc:project-color-thread", onThread, true);
   globalThis[key] = {
     stop() {
       active = false;
       observer.disconnect();
       document.removeEventListener("codexdc:project-color-picker", onRequest);
       document.removeEventListener("codexdc:project-color-select", onRequest);
+      document.removeEventListener("codexdc:project-color-thread", onThread, true);
       for (const root of roots.values()) root.unmount();
       roots.clear();
     },
   };
+  // The renderer may have resolved rows before this bridge was installed.
+  document.dispatchEvent(new Event("codexdc:project-colors-bridge"));
 }
 
-function startPickerHost(api) {
+function startPageBridge(api) {
   const { app, webContents } = require("electron");
   const pages = new Map();
-  const queues = globalThis[Symbol.for("codexdc.project-colors.picker-queues")] ??= new Map();
+  const queues = globalThis[Symbol.for("codexdc.project-colors.page-bridge-queues")] ??= new Map();
   let active = true;
   function configure(contents, enabled) {
     const previous = queues.get(contents) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(() => {
       if (contents.isDestroyed() || (enabled && !active)
         || !/^app:\/\/-\/(?:index|detached-window)\.html(?:[?#]|$)/.test(contents.getURL())) return;
-      return contents.executeJavaScript("(" + installPicker + ")(" + enabled + ")");
+      return contents.executeJavaScript("(" + installPageBridge + ")(" + enabled + ")");
     })
-      .catch(error => api.log.error("Settings color picker bridge failed", error));
+      .catch(error => api.log.error("Project Colors page bridge failed", error));
     queues.set(contents, next);
     return next;
   }
@@ -217,4 +255,4 @@ function startPickerHost(api) {
   };
 }
 
-module.exports = { startPickerHost, installPicker };
+module.exports = { startPageBridge, installPageBridge };
