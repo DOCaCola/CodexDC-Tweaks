@@ -16,7 +16,9 @@ Install and update them from the **Tweak Store** inside CodexDC.
 Usage Lock Override disables forced Luna Reserve selection and the shared Codex
 and Work usage lock on chat input, and suppresses the usage-exhaustion notice and
 automatic reset offer. It also hides sidebar usage-remaining, reset-time, credit,
-and upgrade warning cards. Switching it off restores the original behavior.
+and upgrade warning cards, and replaces the navigation rail's out-of-usage
+indicator with the neutral usage gauge while keeping the remaining quota and
+credit details in its menu. Switching it off restores the original behavior.
 It applies to open and newly opened app windows without restarting the backend.
 Provider usage limits still apply.
 

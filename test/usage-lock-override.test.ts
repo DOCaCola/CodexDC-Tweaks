@@ -250,6 +250,37 @@ test("hides sidebar rate-limit and credit cards before exhaustion and restores t
   unsubscribe();
 });
 
+test("shows exhausted ambient usage with a neutral source and keeps its menu details", async () => {
+  const p = page(featureClient().client);
+  const { store, rawUsage, presentation } = p.usage;
+  const menu = {
+    rows: [{ label: "5-hour limit", value: { text: "0% left", tone: "warning" }, hover: { text: "Resets in 3h 59m" } }],
+    actions: [{ action: "add_credits", label: "Add credits" }],
+  };
+  function ambientResult(kind: string, allowed: boolean) {
+    const result = usageResult("usage_limit_reached", allowed);
+    return { ...result, data: { ...result.data, ambient_usage: {
+      default: { profile_subtext: "Out of usage", source: { kind, heading: "Out of usage" }, menu },
+    } } };
+  }
+  await p.configure();
+  const exhausted = ambientResult("unavailable", false);
+  store.set(rawUsage, exhausted);
+  const visible = store.get(presentation).data.ambient_usage.default;
+  assert.equal(visible.source, undefined);
+  assert.equal(visible.profile_subtext, undefined);
+  assert.equal(visible.menu, menu);
+  assert.equal(store.get(rawUsage), exhausted);
+
+  const included = ambientResult("included", true);
+  store.set(rawUsage, included);
+  assert.equal(store.get(presentation), included);
+
+  store.set(rawUsage, exhausted);
+  await p.configure(false);
+  assert.equal(store.get(presentation).data.ambient_usage, exhausted.data.ambient_usage);
+});
+
 test("suppresses upsells in newly resolved app scopes and restores them on stop", async () => {
   const p = page(featureClient().client);
   await p.configure();

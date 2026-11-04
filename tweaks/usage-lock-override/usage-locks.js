@@ -97,12 +97,21 @@ async function configureUsageLocks({ key, owner, enabled }, findUsageModules, lo
         && data.rate_limit_upsell.banner_type !== "image_generation_limit_reached"
         && data.rate_limit_upsell.model_slug == null
         && data.rate_limit_upsell.blocked_model_slug == null;
-      if (!hideUpsell && data.rate_limit_warning == null && data.sidebar_usage_warnings == null) return result;
+      const ambient = data.ambient_usage?.default;
+      const hideAmbientExhaustion = ambient?.source?.kind === "unavailable";
+      if (!hideUpsell && !hideAmbientExhaustion && data.rate_limit_warning == null
+        && data.sidebar_usage_warnings == null) return result;
       let wrapped = results.get(result);
       if (!wrapped) {
         const presentation = {
           ...data,
           ...(hideUpsell ? { rate_limit_upsell: undefined } : {}),
+          // Without a source, the navigation-rail usage button shows its neutral
+          // usage gauge and the profile omits the server's out-of-usage subtext.
+          // The usage menu keeps its quota and credit rows and actions.
+          ...(hideAmbientExhaustion ? {
+            ambient_usage: { ...data.ambient_usage, default: { ...ambient, source: undefined, profile_subtext: undefined } },
+          } : {}),
           ...(data.rate_limit_warning != null ? { rate_limit_warning: undefined } : {}),
           // An empty presentation keeps the current sidebar renderer from
           // falling back to an older warning implementation.
