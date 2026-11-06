@@ -1,32 +1,67 @@
 "use strict";
 
-const { readFileSync, readdirSync } = require("node:fs");
+const { readFile, readdir } = require("node:fs/promises");
 const { join } = require("node:path");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { configureFeatureGates } = require("./feature-gates.js");
 
 const STATE_KEY = "__codexdcCodexLbFeatureGates__";
+const CACHE_KEY = "gates";
+const READ_CONCURRENCY = 16;
 
-// Discover each feature's renderer gate from the installed webview bundles.
-// Every pattern must match exactly once across the feature's bundles and all
-// of them must name the same gate; otherwise the build is unsupported.
-function discoverGate(assets, names, gate) {
-  const sources = names
-    .filter((name) => name.endsWith(".js") && gate.bundles.some((prefix) => name.startsWith(prefix)))
-    .map((name) => readFileSync(join(assets, name), "utf8"));
-  const ids = gate.patterns.map((pattern) => {
+async function javascriptFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return javascriptFiles(path);
+    return entry.name.endsWith(".js") ? [path] : [];
+  }));
+  return nested.flat();
+}
+
+// Every pattern must match exactly once across the sources and all of them must
+// name the same gate; otherwise the build is unsupported.
+function gateIn(sources, patterns) {
+  const ids = patterns.map((pattern) => {
     const matches = sources.flatMap((source) => [...source.matchAll(pattern)]);
     return matches.length === 1 ? matches[0].groups.gate : null;
   });
   return ids.every((id) => id != null && id === ids[0]) ? ids[0] : null;
 }
 
-function discoverGates(appPath, features, log) {
-  const assets = join(appPath, "webview", "assets");
-  const names = readdirSync(assets);
+// The renderer is split into thousands of chunks whose names change with every
+// build, so only chunks containing a gate's marker are matched.
+async function scanGates(assets, features) {
+  const markers = [...new Set(features.map((feature) => feature.gate.marker))];
+  const sources = new Map(markers.map((marker) => [marker, []]));
+  const files = await javascriptFiles(assets);
+  for (let index = 0; index < files.length; index += READ_CONCURRENCY) {
+    await Promise.all(files.slice(index, index + READ_CONCURRENCY).map(async (file) => {
+      const content = await readFile(file);
+      const found = markers.filter((marker) => content.includes(marker));
+      if (found.length === 0) return;
+      const source = content.toString("utf8");
+      for (const marker of found) sources.get(marker).push(source);
+    }));
+  }
+  return Object.fromEntries(features.map((feature) => [feature.capability, gateIn(sources.get(feature.gate.marker), feature.gate.patterns)]));
+}
+
+// Discovers each feature's renderer gate from the installed webview chunks.
+// Reading every chunk takes a while, so storage keeps the result for the
+// running Codex build and gate patterns only; any change replaces it.
+async function discoverGates({ appPath, build, features, storage, log }) {
+  const key = createHash("sha256")
+    .update(JSON.stringify([build, features.map((feature) => [feature.capability, feature.gate.marker, feature.gate.patterns.map(String)])]))
+    .digest("hex");
+  let found = storage.get(CACHE_KEY, null);
+  if (found?.key !== key) {
+    found = { key, gates: await scanGates(join(appPath, "webview", "assets"), features) };
+    storage.set(CACHE_KEY, found);
+  }
   const gates = new Map();
   for (const feature of features) {
-    const id = discoverGate(assets, names, feature.gate);
+    const id = found.gates[feature.capability];
     if (id == null) log.warn("codex-lb: unsupported Codex build, cannot enable the " + feature.label + " interface");
     else gates.set(feature.capability, id);
   }

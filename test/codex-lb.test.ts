@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import Module, { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,12 +15,12 @@ const { parse } = require("../tweaks/codex-lb/vendor/smol-toml.cjs");
 
 const REGISTRY = Symbol.for("codexdc.codex-lb.capabilities");
 const BUNDLE_STATE = Symbol.for("codexdc.codex-lb.bundle");
-// Shape of the prediction code in the Codex desktop main bundle: the remote
+// Shape of the prediction code in a Codex desktop main-process chunk: the remote
 // config check behind the settings row, the run gate, and the eligibility check.
 const PREDICTION_CODE = [
   "class P{constructor(c){this.controller=c}async isEnabledByRemoteConfig(){return(await this.controller.getConfig())?.is_enabled===!0}}",
-  "async function FRe({client:e,threadId:t,latestTurnId:n,generationTrigger:r,prompt:a,promptVersion:o,configuredReasoningEffort:c,unsupportedModels:l,useThreadSample:u=!1}){let v=await e.resumeThread(t),y=null;if(v.collaborationMode?.mode===`plan`?y=`plan_mode`:v.modelProvider===`openai`?l?.includes(v.model)&&(y=`unsupported_model`):y=`unsupported_provider`,y!=null)return y;return \"eligible\"}",
-  "async function run(c,thread){if(c==null||!c.is_enabled)return null;return FRe({client:{resumeThread:async()=>thread},threadId:1,latestTurnId:2,generationTrigger:3,prompt:4,promptVersion:5,configuredReasoningEffort:6,unsupportedModels:c.unsupported_models,useThreadSample:!1})}",
+  "async function FRe({client:e,threadId:t,latestTurnId:r,generationTrigger:n,prompt:i,promptVersion:s,configuredReasoningEffort:a,unsupportedModels:o,interruptOnCancel:l=!1}){let f=await e.resumeThread(t),b=null;if(f.collaborationMode?.mode===\"plan\"?b=\"plan_mode\":\"openai\"!==f.modelProvider?b=\"unsupported_provider\":o?.includes(f.model)&&(b=\"unsupported_model\"),null!=b)return b;return \"eligible\"}",
+  "async function run(o,thread){if(null==o||!o.is_enabled)return null;return FRe({client:{resumeThread:async()=>thread},threadId:1,latestTurnId:2,generationTrigger:3,prompt:4,promptVersion:5,configuredReasoningEffort:6,unsupportedModels:o.unsupported_models,interruptOnCancel:!1})}",
 ].join(";");
 
 function loadPredictionCode(source: string) {
@@ -224,43 +224,55 @@ test("the registry reports offered capabilities and notifies on changes", async 
   assert.equal(notified, 2);
 });
 
-test("each feature gate is discovered from the installed renderer bundles", () => {
+test("each feature gate is discovered from the renderer chunks and kept for the current build", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-lb-gates-"));
   const assets = join(root, "webview", "assets");
-  const settings = "let s=Et(`4290031608`),c=he.cumberbatch,l=L(Xn);";
-  const composer = "E3s=W(V,({get:e})=>e(e_,`4290031608`)&&Cr(e,N().enabled)&&mi.cumberbatch!=null);";
-  const background = "async function zN(e,t,n,r){let i=H?.cumberbatch;if(i!=null&&!R(n.hostId)&&r()&&Kl(e,`4290031608`))try{}finally{}}";
+  const settings = "let h=e.enabled,f=(0,G.Zj)(\"4290031608\"),m=Y.appServices.cumberbatch,b=(0,g.Ul)(Z.o8);";
+  const composer = "h=(0,o.un)(c.u,({get:e})=>e(m.JW,\"4290031608\")&&(0,u.CN)(e,(0,l.W)().enabled)&&null!=s.appServices.cumberbatch),f=1;";
+  const background = "async function zN(e,t,n,a){let s=H.appServices?.cumberbatch;if(!(null==s||(0,i.ZJQ)(n.hostId))&&a()&&(0,ej.ie)(e,\"4290031608\"))try{}finally{}}";
   const write = (files: Record<string, string>) => {
     rmSync(assets, { recursive: true, force: true });
-    mkdirSync(assets, { recursive: true });
+    mkdirSync(join(assets, "async"), { recursive: true });
     for (const [name, source] of Object.entries(files)) writeFileSync(join(assets, name), source);
   };
+  const store = new Map<string, unknown>();
+  const storage = {
+    get: (key: string, fallback: unknown) => (store.has(key) ? store.get(key) : fallback),
+    set: (key: string, value: unknown) => store.set(key, value),
+  };
+  const discover = (build: string, log = logger()) => discoverGates({ appPath: root, build, features: FEATURES, storage, log });
   try {
     const log = logger();
     write({
-      "general-settings-a.js": settings,
-      "general-settings-b.js": "",
-      "app-initial-a.js": composer,
-      "initialize-app-host-services-a.js": background,
-      "unrelated-a.js": settings,
+      "async/553834.a.js": settings,
+      "async/16389.b.js": composer,
+      "async/39017.c.js": "let unrelated=1;",
+      "182735.d.js": background,
     });
-    assert.deepEqual([...discoverGates(root, FEATURES, log)], [["composer_predictions", "4290031608"]]);
+    assert.deepEqual([...await discover("1", log)], [["composer_predictions", "4290031608"]]);
     assert.deepEqual(log.entries, []);
 
+    // The same build reuses the stored gates without reading the chunks again.
+    rmSync(assets, { recursive: true, force: true });
+    assert.deepEqual([...await discover("1")], [["composer_predictions", "4290031608"]]);
+
+    // A new build replaces the stored gates.
+    const changed = logger();
     write({
-      "general-settings-a.js": settings,
-      "app-initial-a.js": composer.replace("4290031608", "1"),
-      "initialize-app-host-services-a.js": background,
+      "async/553834.a.js": settings,
+      "async/16389.b.js": composer.replace("4290031608", "1"),
+      "182735.d.js": background,
     });
-    assert.deepEqual([...discoverGates(root, FEATURES, log)], []);
-    assert.deepEqual(log.entries, ["codex-lb: unsupported Codex build, cannot enable the Composer predictions interface"]);
+    assert.deepEqual([...await discover("2", changed)], []);
+    assert.deepEqual(changed.entries, ["codex-lb: unsupported Codex build, cannot enable the Composer predictions interface"]);
+    assert.deepEqual([...store.keys()], ["gates"]);
 
     write({
-      "general-settings-a.js": settings + settings,
-      "app-initial-a.js": composer,
-      "initialize-app-host-services-a.js": background,
+      "async/553834.a.js": settings + settings,
+      "async/16389.b.js": composer,
+      "182735.d.js": background,
     });
-    assert.deepEqual([...discoverGates(root, FEATURES, logger())], []);
+    assert.deepEqual([...await discover("3")], []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -341,33 +353,34 @@ test("a new tweak instance replaces the previous page override", () => {
   assert.equal(page.client.checkGate("y"), false);
 });
 
-test("the desktop main bundle is patched once while it loads", async () => {
+test("the main-process chunk with a feature's code is patched once while it loads", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-lb-"));
   const original = (Module.prototype as any)._compile;
   delete (globalThis as any)[BUNDLE_STATE];
   try {
-    mkdirSync(join(root, ".vite", "build"), { recursive: true });
-    const bundle = join(root, ".vite", "build", "main-Test.js");
-    const other = join(root, ".vite", "build", "src-Test.js");
-    writeFileSync(bundle, PREDICTION_CODE + ";module.exports=run;");
-    writeFileSync(other, PREDICTION_CODE + ";module.exports=run;");
+    const build = join(root, ".vite", "build");
+    mkdirSync(build, { recursive: true });
+    const chunk = join(build, "early-bootstrap-747-a.js");
+    const other = join(build, "early-bootstrap-12-b.js");
+    writeFileSync(chunk, PREDICTION_CODE + ";module.exports=run;");
+    writeFileSync(other, "module.exports=1;");
 
     const log = logger();
-    installBundlePatch(log, {});
-    const untouched = require(other);
-    const patched = require(bundle);
+    installBundlePatch(log, build, {});
+    assert.equal(require(other), 1);
+    assert.notEqual((Module.prototype as any)._compile, original);
+    const patched = require(chunk);
     assert.equal((Module.prototype as any)._compile, original);
 
     const registry = { has: () => true, offers: () => true };
     const config = { is_enabled: false, unsupported_models: [] };
     await withRegistry(registry, async () => {
       assert.equal(await patched(config, { modelProvider: "codex-lb" }), "eligible");
-      assert.equal(await untouched(config, { modelProvider: "codex-lb" }), null);
     });
     assert.ok(log.entries.some((entry) => entry.includes("Composer predictions available")));
 
     const restarted = logger();
-    installBundlePatch(restarted, {});
+    installBundlePatch(restarted, build, {});
     assert.equal((Module.prototype as any)._compile, original);
     assert.deepEqual(restarted.entries, []);
   } finally {
@@ -377,15 +390,36 @@ test("the desktop main bundle is patched once while it loads", async () => {
   }
 });
 
-test("enabling after the bundle loaded asks for a restart", () => {
+test("a feature whose code is not in exactly one chunk stays unchanged", () => {
+  const build = mkdtempSync(join(tmpdir(), "codex-lb-"));
+  const original = (Module.prototype as any)._compile;
   delete (globalThis as any)[BUNDLE_STATE];
   try {
+    writeFileSync(join(build, "early-bootstrap-1-a.js"), PREDICTION_CODE);
+    writeFileSync(join(build, "early-bootstrap-2-b.js"), PREDICTION_CODE);
+    const log = logger();
+    installBundlePatch(log, build, {});
+    assert.equal((Module.prototype as any)._compile, original);
+    assert.deepEqual(log.entries, ["codex-lb: unsupported Codex build, Composer predictions stay limited to the OpenAI provider"]);
+  } finally {
+    delete (globalThis as any)[BUNDLE_STATE];
+    rmSync(build, { recursive: true, force: true });
+  }
+});
+
+test("enabling after the chunk loaded asks for a restart", () => {
+  const build = realpathSync(mkdtempSync(join(tmpdir(), "codex-lb-")));
+  delete (globalThis as any)[BUNDLE_STATE];
+  try {
+    const chunk = join(build, "early-bootstrap-747-a.js");
+    writeFileSync(chunk, PREDICTION_CODE);
     const log = logger();
     const original = (Module.prototype as any)._compile;
-    installBundlePatch(log, { "/App/.vite/build/main-Loaded.js": {} });
+    installBundlePatch(log, build, { [chunk]: {} });
     assert.equal((Module.prototype as any)._compile, original);
     assert.deepEqual(log.entries, ["codex-lb: restart Codex to enable Composer predictions"]);
   } finally {
     delete (globalThis as any)[BUNDLE_STATE];
+    rmSync(build, { recursive: true, force: true });
   }
 });

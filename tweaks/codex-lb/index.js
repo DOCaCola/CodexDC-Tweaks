@@ -1,17 +1,16 @@
 "use strict";
 
 const Module = require("node:module");
-const { readFileSync, watch } = require("node:fs");
+const { readFileSync, readdirSync, realpathSync, watch } = require("node:fs");
 const { homedir } = require("node:os");
 const { basename, dirname, join } = require("node:path");
 const { parse } = require("./vendor/smol-toml.cjs");
-const { FEATURES, patchSource } = require("./features.js");
+const { FEATURES, patchFeature, patchSource } = require("./features.js");
 const { discoverGates, createGateController } = require("./gates.js");
 
 const REGISTRY = Symbol.for("codexdc.codex-lb.capabilities");
 const BUNDLE_STATE = Symbol.for("codexdc.codex-lb.bundle");
 const GATE_QUEUES = Symbol.for("codexdc.codex-lb.gate-queues");
-const MAIN_BUNDLE = /[\\/]\.vite[\\/]build[\\/]main-[^\\/]+\.js$/;
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
 const CONFIG_DEBOUNCE_MS = 1_000;
@@ -125,29 +124,56 @@ function createRegistry({ fetch, readConfig, env, log }) {
   };
 }
 
-// The desktop main bundle is compiled once per process. The hook patches it as
-// it loads; the patched checks consult the registry, so stopping the tweak
-// restores the original behaviour without reloading code.
-function installBundlePatch(log, cache = require.cache) {
-  const state = (globalThis[BUNDLE_STATE] ??= { compiled: false, applied: [] });
-  if (state.compiled || Object.keys(cache).some((path) => MAIN_BUNDLE.test(path))) {
-    const missing = FEATURES.filter((feature) => !state.applied.includes(feature.capability));
-    if (missing.length > 0) {
-      log.warn("codex-lb: restart Codex to enable " + missing.map((feature) => feature.label).join(", "));
+// The main process is split into chunks whose names change with every build.
+// Each feature belongs to the one chunk in which all of its patches match.
+function locateFeatures(buildDir, features) {
+  // Node names compiled modules by their real path.
+  const directory = realpathSync(buildDir);
+  const sources = readdirSync(directory)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => ({ path: join(directory, name), source: readFileSync(join(directory, name), "utf8") }));
+  const targets = new Map();
+  const unsupported = [];
+  for (const feature of features) {
+    const chunks = sources.filter(({ source }) => patchFeature(source, feature) != null);
+    if (chunks.length !== 1) {
+      unsupported.push(feature);
+      continue;
     }
-    return () => {};
+    targets.set(chunks[0].path, [...(targets.get(chunks[0].path) ?? []), feature]);
   }
+  return { targets, unsupported };
+}
+
+function unsupportedBuild(log, feature) {
+  log.warn("codex-lb: unsupported Codex build, " + feature.label + " stay limited to the OpenAI provider");
+}
+
+// Each chunk is compiled once per process. The hook patches a feature's chunk
+// as it loads; the patched checks consult the registry, so stopping the tweak
+// restores the original behaviour without reloading code.
+function installBundlePatch(log, buildDir, cache = require.cache) {
+  const state = (globalThis[BUNDLE_STATE] ??= { applied: [] });
+  const pending = FEATURES.filter((feature) => !state.applied.includes(feature.capability));
+  if (pending.length === 0) return () => {};
+  const { targets, unsupported } = locateFeatures(buildDir, pending);
+  for (const feature of unsupported) unsupportedBuild(log, feature);
+  const loaded = [...targets].filter(([path]) => path in cache);
+  for (const [path] of loaded) targets.delete(path);
+  if (loaded.length > 0) {
+    log.warn("codex-lb: restart Codex to enable " + loaded.flatMap(([, features]) => features).map((feature) => feature.label).join(", "));
+  }
+  if (targets.size === 0) return () => {};
   const compile = Module.prototype._compile;
   function patchedCompile(content, filename) {
-    if (!MAIN_BUNDLE.test(filename)) return compile.call(this, content, filename);
-    Module.prototype._compile = compile;
-    state.compiled = true;
-    const result = patchSource(content);
-    state.applied = result.applied.map((feature) => feature.capability);
+    const features = targets.get(filename);
+    if (features == null) return compile.call(this, content, filename);
+    targets.delete(filename);
+    if (targets.size === 0) Module.prototype._compile = compile;
+    const result = patchSource(content, features);
+    state.applied.push(...result.applied.map((feature) => feature.capability));
     for (const feature of result.applied) log.info("codex-lb: " + feature.label + " available for confirmed providers");
-    for (const feature of result.skipped) {
-      log.warn("codex-lb: unsupported Codex build, " + feature.label + " stay limited to the OpenAI provider");
-    }
+    for (const feature of result.skipped) unsupportedBuild(log, feature);
     return compile.call(this, result.source, filename);
   }
   Module.prototype._compile = patchedCompile;
@@ -163,7 +189,8 @@ function start(api) {
   const host = require("electron");
   const env = process.env;
   const configPath = codexConfigPath(env);
-  const uninstallBundlePatch = installBundlePatch(api.log);
+  const appPath = host.app.getAppPath();
+  const uninstallBundlePatch = installBundlePatch(api.log, join(appPath, ".vite", "build"));
   const registry = createRegistry({
     fetch: (url, init) => host.net.fetch(url, init),
     readConfig: () => {
@@ -181,7 +208,7 @@ function start(api) {
 
   // A feature's interface appears only when its main-bundle patch is in effect
   // and a confirmed codex-lb provider offers it.
-  const gates = discoverGates(host.app.getAppPath(), FEATURES, api.log);
+  let gates = new Map();
   const gateController = createGateController(host, api.log, (globalThis[GATE_QUEUES] ??= new WeakMap()));
   const updateGates = () => {
     const applied = globalThis[BUNDLE_STATE]?.applied ?? [];
@@ -189,6 +216,12 @@ function start(api) {
     void gateController.update(enabled.map(([, gate]) => gate));
   };
   const unsubscribe = registry.subscribe(updateGates);
+  discoverGates({ appPath, build: host.app.getVersion(), features: FEATURES, storage: api.storage, log: api.log })
+    .then((found) => {
+      gates = found;
+      updateGates();
+    })
+    .catch((error) => api.log.error("codex-lb: feature gate discovery failed", error));
 
   const refresh = () => {
     registry.refresh().catch((error) => api.log.error("codex-lb: capability refresh failed", error));
@@ -223,5 +256,5 @@ function stop() {
 module.exports = {
   start,
   stop,
-  __test: { codexConfigPath, customProviders, probeProvider, createRegistry, installBundlePatch, MAIN_BUNDLE },
+  __test: { codexConfigPath, customProviders, probeProvider, createRegistry, installBundlePatch },
 };

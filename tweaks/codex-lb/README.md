@@ -32,6 +32,9 @@ minutes. The desktop code is adjusted while it loads, so enabling the tweak take
 effect after restarting Codex. Disabling it restores the original behaviour
 immediately. If a Codex update changes the affected code, the feature stays
 limited to the `openai` provider and the tweak logs the unsupported build.
+After each Codex update, the first start searches the desktop interface for the
+feature switches in the background; later starts of that version reuse the
+result.
 
 Bundles [smol-toml](https://github.com/squirrelchat/smol-toml) 1.9.1
 (BSD-3-Clause, see `vendor/smol-toml.LICENSE`) to read the Codex configuration.

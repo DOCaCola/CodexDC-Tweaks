@@ -3,9 +3,11 @@
 // Desktop features that Codex restricts to threads on the built-in `openai`
 // provider. Each feature widens its restrictions to threads whose provider and
 // model codex-lb confirms for that capability. Every patch of a feature targets
-// the installed main bundle and must match exactly once; otherwise the whole
-// feature stays unchanged. The renderer shows a feature only behind its
-// Statsig gate, which the tweak turns on while codex-lb offers the capability.
+// one chunk of the main-process build and must match exactly once there;
+// otherwise the whole feature stays unchanged. The renderer shows a feature only
+// behind its Statsig gate, which the tweak turns on while codex-lb offers the
+// capability. Each gate pattern must match exactly once across the renderer
+// chunks that contain the gate's marker.
 
 const REGISTRY_EXPRESSION = 'globalThis[Symbol.for("codexdc.codex-lb.capabilities")]';
 // Whether OpenAI's remote prediction config enables predictions for the
@@ -25,14 +27,14 @@ const FEATURES = [
     capability: "composer_predictions",
     label: "Composer predictions",
     gate: {
-      bundles: ["general-settings-", "app-initial-", "app-primary-", "app-shared-", "initialize-app-host-services-"],
+      marker: "cumberbatch",
       patterns: [
         // The "Show predictions" settings row.
-        /[$\w]+=[$\w]+\(`(?<gate>\d+)`\),[$\w]+=[$\w]+\.cumberbatch,/g,
+        /[$\w]+=\(0,[$\w]+\.[$\w]+\)\("(?<gate>\d+)"\),[$\w]+=[$\w]+\.appServices\.cumberbatch,/g,
         // Predictions in the composer.
-        /[$\w]+\([$\w]+,`(?<gate>\d+)`\)&&[$\w]+\([$\w]+,[$\w]+\(\)\.enabled\)&&[$\w]+\.cumberbatch!=null/g,
+        /[$\w]+\([$\w]+\.[$\w]+,"(?<gate>\d+)"\)&&\(0,[$\w]+\.[$\w]+\)\([$\w]+,\(0,[$\w]+\.[$\w]+\)\(\)\.enabled\)&&null!=[$\w]+\.appServices\.cumberbatch\)/g,
         // Background predictions after each turn.
-        /let ([$\w]+)=[$\w]+\?\.cumberbatch;if\(\1!=null&&![$\w]+\([$\w]+\.hostId\)&&[$\w]+\(\)&&[$\w]+\([$\w]+,`(?<gate>\d+)`\)\)try\{/g,
+        /let ([$\w]+)=[$\w]+\.appServices\?\.cumberbatch;if\(!\(null==\1\|\|\(0,[$\w]+\.[$\w]+\)\([$\w]+\.hostId\)\)&&[$\w]+\(\)&&\(0,[$\w]+\.[$\w]+\)\([$\w]+,"(?<gate>\d+)"\)\)try\{/g,
       ],
     },
     patches: [
@@ -47,8 +49,8 @@ const FEATURES = [
         // A prediction run stops when the remote config disables predictions,
         // unless a codex-lb provider offers them. Eligibility below then admits
         // only threads on codex-lb models.
-        pattern: /if\(([$\w]+)==null\|\|!\1\.is_enabled\)return null;/g,
-        replace: (config) => `if(${config}==null||!${config}.is_enabled&&!(${offers("composer_predictions")}))return null;`,
+        pattern: /if\(null==([$\w]+)\|\|!\1\.is_enabled\)return null;/g,
+        replace: (config) => `if(null==${config}||!${config}.is_enabled&&!(${offers("composer_predictions")}))return null;`,
       },
       {
         pattern: /unsupportedModels:([$\w]+)\.unsupported_models,/g,
@@ -62,9 +64,9 @@ const FEATURES = [
       {
         // Eligibility rejects plan mode, then any provider other than `openai`
         // as unsupported_provider before a prediction fork is started.
-        pattern: /(?<![$\w])([$\w]+)\.collaborationMode\?\.mode===`plan`\?([$\w]+)=`plan_mode`:\1\.modelProvider===`openai`\?/g,
+        pattern: /(?<![$\w])([$\w]+)\.collaborationMode\?\.mode==="plan"\?([$\w]+)="plan_mode":"openai"!==\1\.modelProvider\?\2="unsupported_provider":/g,
         replace: (thread, reason) =>
-          `${thread}.collaborationMode?.mode===\`plan\`?${reason}=\`plan_mode\`:(${thread}.modelProvider===\`openai\`&&${REMOTE_PREDICTIONS}!==!1||${allows(thread, "composer_predictions")})?`,
+          `${thread}.collaborationMode?.mode==="plan"?${reason}="plan_mode":!(${thread}.modelProvider==="openai"&&${REMOTE_PREDICTIONS}!==!1||${allows(thread, "composer_predictions")})?${reason}="unsupported_provider":`,
       },
     ],
   },
@@ -97,4 +99,4 @@ function patchSource(source, features = FEATURES) {
   return { source: patched, applied, skipped };
 }
 
-module.exports = { FEATURES, patchSource };
+module.exports = { FEATURES, patchFeature, patchSource };
