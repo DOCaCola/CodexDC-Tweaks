@@ -366,11 +366,14 @@ test("the main-process chunk with a feature's code is patched once while it load
     writeFileSync(other, "module.exports=1;");
 
     const log = logger();
-    installBundlePatch(log, build, {});
+    let applied = 0;
+    installBundlePatch(log, build, () => applied++, {});
     assert.equal(require(other), 1);
     assert.notEqual((Module.prototype as any)._compile, original);
+    assert.equal(applied, 0);
     const patched = require(chunk);
     assert.equal((Module.prototype as any)._compile, original);
+    assert.equal(applied, 1);
 
     const registry = { has: () => true, offers: () => true };
     const config = { is_enabled: false, unsupported_models: [] };
@@ -380,7 +383,7 @@ test("the main-process chunk with a feature's code is patched once while it load
     assert.ok(log.entries.some((entry) => entry.includes("Composer predictions available")));
 
     const restarted = logger();
-    installBundlePatch(restarted, build, {});
+    installBundlePatch(restarted, build, () => applied++, {});
     assert.equal((Module.prototype as any)._compile, original);
     assert.deepEqual(restarted.entries, []);
   } finally {
@@ -398,7 +401,7 @@ test("a feature whose code is not in exactly one chunk stays unchanged", () => {
     writeFileSync(join(build, "early-bootstrap-1-a.js"), PREDICTION_CODE);
     writeFileSync(join(build, "early-bootstrap-2-b.js"), PREDICTION_CODE);
     const log = logger();
-    installBundlePatch(log, build, {});
+    installBundlePatch(log, build, () => assert.fail("nothing is applied"), {});
     assert.equal((Module.prototype as any)._compile, original);
     assert.deepEqual(log.entries, ["codex-lb: unsupported Codex build, Composer predictions stay limited to the OpenAI provider"]);
   } finally {
@@ -415,7 +418,7 @@ test("enabling after the chunk loaded asks for a restart", () => {
     writeFileSync(chunk, PREDICTION_CODE);
     const log = logger();
     const original = (Module.prototype as any)._compile;
-    installBundlePatch(log, build, { [chunk]: {} });
+    installBundlePatch(log, build, () => assert.fail("nothing is applied"), { [chunk]: {} });
     assert.equal((Module.prototype as any)._compile, original);
     assert.deepEqual(log.entries, ["codex-lb: restart Codex to enable Composer predictions"]);
   } finally {

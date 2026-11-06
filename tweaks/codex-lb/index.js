@@ -150,9 +150,10 @@ function unsupportedBuild(log, feature) {
 }
 
 // Each chunk is compiled once per process. The hook patches a feature's chunk
-// as it loads; the patched checks consult the registry, so stopping the tweak
-// restores the original behaviour without reloading code.
-function installBundlePatch(log, buildDir, cache = require.cache) {
+// as it loads, which can happen any time after startup, and reports newly
+// applied features through onApplied. The patched checks consult the registry,
+// so stopping the tweak restores the original behaviour without reloading code.
+function installBundlePatch(log, buildDir, onApplied, cache = require.cache) {
   const state = (globalThis[BUNDLE_STATE] ??= { applied: [] });
   const pending = FEATURES.filter((feature) => !state.applied.includes(feature.capability));
   if (pending.length === 0) return () => {};
@@ -174,7 +175,9 @@ function installBundlePatch(log, buildDir, cache = require.cache) {
     state.applied.push(...result.applied.map((feature) => feature.capability));
     for (const feature of result.applied) log.info("codex-lb: " + feature.label + " available for confirmed providers");
     for (const feature of result.skipped) unsupportedBuild(log, feature);
-    return compile.call(this, result.source, filename);
+    const exports = compile.call(this, result.source, filename);
+    if (result.applied.length > 0) onApplied();
+    return exports;
   }
   Module.prototype._compile = patchedCompile;
   return () => {
@@ -190,7 +193,6 @@ function start(api) {
   const env = process.env;
   const configPath = codexConfigPath(env);
   const appPath = host.app.getAppPath();
-  const uninstallBundlePatch = installBundlePatch(api.log, join(appPath, ".vite", "build"));
   const registry = createRegistry({
     fetch: (url, init) => host.net.fetch(url, init),
     readConfig: () => {
@@ -216,6 +218,7 @@ function start(api) {
     void gateController.update(enabled.map(([, gate]) => gate));
   };
   const unsubscribe = registry.subscribe(updateGates);
+  const uninstallBundlePatch = installBundlePatch(api.log, join(appPath, ".vite", "build"), updateGates);
   discoverGates({ appPath, build: host.app.getVersion(), features: FEATURES, storage: api.storage, log: api.log })
     .then((found) => {
       gates = found;
