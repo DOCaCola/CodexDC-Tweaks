@@ -137,7 +137,9 @@ const presentationSource = "gPv1(e,t,n){let v=(0,s.RD)(d.u,I(\"automatic\"),_.m9
   + "function I(e){let t=\"usage-settings\"===e;return({get:e,scope:n,queryClient:i})=>{"
   + "let v=h?.get(\"base_interval_ms\",3e4),E=h?.get(\"usage_scaling_multiplier\",1);"
   + "return{refetchInterval:e=>e.state.data?.rate_limit?.allowed===!1?5e3:v,refetchIntervalInBackground:!0}}}"
-  + "n.d(t,{Os:()=>T},{Ix:v,qR:E})}";
+  // Codex 26.1103 also exports an inline invalidation function from this module.
+  + "n.d(t,{Os:()=>T},{$$:function(e,{includePresentations:t=!1}={}){\"push\"!==e.get(_.n0).transport"
+  + "&&(t?e.queryClient.invalidateQueries({queryKey:[\"rate-limit-status\"]}):e.query.invalidate(v))},Ix:v,qR:E})}";
 const sidebarSource = "XPat(e,t,n){let u={personal:\"3605558075\",workspace_owner:\"1385051397\",workspace_member:\"2673725514\"},"
   + "d={enabled:!1,showWithCredits:!1,exposureThresholdPercent:20,remainingThresholdPercent:20};n.d(t,{Pr:()=>u})}";
 

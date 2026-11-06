@@ -11,13 +11,61 @@ function findUsageModules(modules) {
   const sidebarAlert = new RegExp("[$\\w]+=\\{personal:" + quote + "(\\d+)" + quote + ",workspace_owner:" + quote + "(\\d+)" + quote
     + ",workspace_member:" + quote + "(\\d+)" + quote + "\\},[$\\w]+=\\{enabled:!1,showWithCredits:!1,exposureThresholdPercent:", "g");
 
+  const quotes = "\"'\x60", opening = "{([", closingBrackets = "})]";
+
+  // Return the index after the string literal or bracketed group that starts
+  // at source[start].
+  function skip(source, start) {
+    const char = source[start];
+    if (quotes.includes(char)) {
+      let index = start + 1;
+      for (; index < source.length && source[index] !== char; index++) if (source[index] === "\\") index++;
+      if (index < source.length) return index + 1;
+    } else {
+      for (let index = start + 1; index < source.length;) {
+        const next = source[index];
+        if (quotes.includes(next) || opening.includes(next)) index = skip(source, index);
+        else if (closingBrackets.includes(next)) return index + 1;
+        else index++;
+      }
+    }
+    throw new Error("Unsupported Codex build: unterminated module export");
+  }
+
+  // Split an object literal's body at its top-level commas.
+  function entries(source, start, end) {
+    const parts = [];
+    let from = start;
+    for (let index = start; index < end;) {
+      const char = source[index];
+      if (quotes.includes(char) || opening.includes(char)) index = skip(source, index);
+      else {
+        if (char === ",") {
+          parts.push(source.slice(from, index));
+          from = index + 1;
+        }
+        index++;
+      }
+    }
+    parts.push(source.slice(from, end));
+    return parts;
+  }
+
   // Rspack defines exports as n.d(exports,{name:()=>local},{name:local}).
+  // Value maps can also hold inline functions and constants; only bindings
+  // to module locals are relevant here.
   function exportsOf(source) {
     const names = new Map();
-    for (const match of source.matchAll(/\.d\([$\w]+,\{([^{}]*)\}(?:,\{([^{}]*)\})?\)/g)) {
-      for (const entry of [match[1], match[2] ?? ""].join(",").split(",")) {
-        const parsed = /^([$\w]+):(?:\(\)=>)?([$\w]+)$/.exec(entry);
-        if (parsed) names.set(parsed[2], parsed[1]);
+    for (const match of source.matchAll(/\.d\([$\w]+,(?=\{)/g)) {
+      let start = match.index + match[0].length;
+      for (;;) {
+        const end = skip(source, start);
+        for (const entry of entries(source, start + 1, end - 1)) {
+          const parsed = /^([$\w]+):(?:\(\)=>)?([$\w]+)$/.exec(entry);
+          if (parsed) names.set(parsed[2], parsed[1]);
+        }
+        if (source[end] !== "," || source[end + 1] !== "{") break;
+        start = end + 1;
       }
     }
     return names;
