@@ -7,10 +7,12 @@ const { basename, dirname, join } = require("node:path");
 const { parse } = require("./vendor/smol-toml.cjs");
 const { FEATURES, patchFeature, patchSource } = require("./features.js");
 const { discoverGates, createGateController } = require("./gates.js");
+const { createUsageController, fetchUsage } = require("./usage.js");
 
 const REGISTRY = Symbol.for("codexdc.codex-lb.capabilities");
 const BUNDLE_STATE = Symbol.for("codexdc.codex-lb.bundle");
 const GATE_QUEUES = Symbol.for("codexdc.codex-lb.gate-queues");
+const USAGE_QUEUES = Symbol.for("codexdc.codex-lb.usage-queues");
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
 const CONFIG_DEBOUNCE_MS = 1_000;
@@ -31,10 +33,22 @@ function customProviders(config, env) {
     }
     const token = provider.experimental_bearer_token ?? (provider.env_key ? env[provider.env_key] : undefined);
     if (token) headers.Authorization = "Bearer " + token;
-    const url = new URL(provider.base_url.replace(/\/+$/, "") + "/codex-lb/capabilities");
-    for (const [name, value] of Object.entries(provider.query_params ?? {})) url.searchParams.set(name, String(value));
-    return [{ id, url: url.toString(), headers }];
+    const query = Object.fromEntries(Object.entries(provider.query_params ?? {}).map(([name, value]) => [name, String(value)]));
+    return [{ id, baseUrl: provider.base_url.replace(/\/+$/, ""), query, headers }];
   });
+}
+
+// codex-lb resolves its own endpoints relative to the provider base URL, like <base_url>/models.
+function providerUrl(provider, path, params = {}) {
+  const url = new URL(provider.baseUrl + path);
+  for (const [name, value] of Object.entries({ ...provider.query, ...params })) url.searchParams.set(name, value);
+  return url.toString();
+}
+
+// The provider Codex uses for new threads: the active profile's, else the top-level one.
+function defaultProviderId(config) {
+  const profile = typeof config.profile === "string" ? config.profiles?.[config.profile] : undefined;
+  return profile?.model_provider ?? config.model_provider ?? "openai";
 }
 
 class TransientProbeError extends Error {}
@@ -49,7 +63,10 @@ function isCapability(entry) {
 async function probeProvider(fetch, provider) {
   let response;
   try {
-    response = await fetch(provider.url, { headers: provider.headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    response = await fetch(providerUrl(provider, "/codex-lb/capabilities"), {
+      headers: provider.headers,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
   } catch (error) {
     throw new TransientProbeError(error instanceof Error ? error.message : String(error));
   }
@@ -75,18 +92,23 @@ function describe(capabilities) {
 
 function createRegistry({ fetch, readConfig, env, log }) {
   let confirmed = new Map();
+  let endpoints = new Map();
+  let defaultProvider = "openai";
   let generation = 0;
   const listeners = new Set();
 
   function signature(providers) {
-    return [...providers].sort(([a], [b]) => a.localeCompare(b)).map(([id, capabilities]) => id + ": " + describe(capabilities)).join("; ");
+    return [...providers].sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, capabilities]) => id + " " + JSON.stringify(endpoints.get(id)) + ": " + describe(capabilities)).join("; ");
   }
 
   async function refresh() {
     const run = ++generation;
-    let providers;
+    let providers, configuredDefault;
     try {
-      providers = customProviders(parse(readConfig()), env);
+      const config = parse(readConfig());
+      providers = customProviders(config, env);
+      configuredDefault = defaultProviderId(config);
     } catch (error) {
       log.warn("codex-lb: cannot read the Codex provider configuration", String(error));
       return;
@@ -108,14 +130,21 @@ function createRegistry({ fetch, readConfig, env, log }) {
         log.info("codex-lb: provider " + id + ": " + describe(capabilities));
       }
     }
-    const changed = signature(next) !== signature(confirmed);
+    const previous = signature(confirmed) + "; default " + defaultProvider;
+    endpoints = new Map(providers.filter(({ id }) => next.has(id)).map((provider) => [provider.id, provider]));
     confirmed = next;
-    if (changed) for (const listener of listeners) listener();
+    defaultProvider = configuredDefault;
+    if (signature(confirmed) + "; default " + defaultProvider !== previous) for (const listener of listeners) listener();
   }
 
   return {
     has: (providerId, capability, model) => confirmed.get(providerId)?.get(capability)?.has(model) === true,
     offers: (capability) => [...confirmed.values()].some((capabilities) => (capabilities.get(capability)?.size ?? 0) > 0),
+    // Confirmed providers offering the capability for some model, with the endpoint Codex uses for them.
+    providers: (capability) => [...confirmed]
+      .filter(([, capabilities]) => (capabilities.get(capability)?.size ?? 0) > 0)
+      .map(([id]) => endpoints.get(id)),
+    defaultProvider: () => defaultProvider,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -193,8 +222,9 @@ function start(api) {
   const env = process.env;
   const configPath = codexConfigPath(env);
   const appPath = host.app.getAppPath();
+  const fetch = (url, init) => host.net.fetch(url, init);
   const registry = createRegistry({
-    fetch: (url, init) => host.net.fetch(url, init),
+    fetch,
     readConfig: () => {
       try {
         return readFileSync(configPath, "utf8");
@@ -217,7 +247,20 @@ function start(api) {
     const enabled = [...gates].filter(([capability]) => applied.includes(capability) && registry.offers(capability));
     void gateController.update(enabled.map(([, gate]) => gate));
   };
-  const unsubscribe = registry.subscribe(updateGates);
+  // The usage popover replaces the rail's usage menu while a provider offers usage.
+  const usage = createUsageController({
+    host,
+    log: api.log,
+    queues: (globalThis[USAGE_QUEUES] ??= new WeakMap()),
+    load: (provider, since) => fetchUsage(fetch, providerUrl, provider, since),
+  });
+  const updateUsage = () => {
+    void usage.update(registry.providers("usage"), registry.defaultProvider());
+  };
+  const unsubscribe = registry.subscribe(() => {
+    updateGates();
+    updateUsage();
+  });
   const uninstallBundlePatch = installBundlePatch(api.log, join(appPath, ".vite", "build"), updateGates);
   discoverGates({ appPath, build: host.app.getVersion(), features: FEATURES, storage: api.storage, log: api.log })
     .then((found) => {
@@ -241,7 +284,7 @@ function start(api) {
   active = () => {
     uninstallBundlePatch();
     unsubscribe();
-    const stopped = gateController.stop();
+    const stopped = Promise.all([gateController.stop(), usage.stop()]);
     watcher.close();
     clearTimeout(debounce);
     clearInterval(interval);
@@ -259,5 +302,5 @@ function stop() {
 module.exports = {
   start,
   stop,
-  __test: { codexConfigPath, customProviders, probeProvider, createRegistry, installBundlePatch },
+  __test: { codexConfigPath, customProviders, providerUrl, defaultProviderId, probeProvider, createRegistry, installBundlePatch },
 };

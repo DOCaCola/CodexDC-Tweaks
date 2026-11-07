@@ -8,7 +8,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const { FEATURES, patchSource } = require("../tweaks/codex-lb/features.js");
-const { customProviders, createRegistry, installBundlePatch } = require("../tweaks/codex-lb/index.js").__test;
+const { customProviders, providerUrl, defaultProviderId, createRegistry, installBundlePatch } = require("../tweaks/codex-lb/index.js").__test;
 const { discoverGates } = require("../tweaks/codex-lb/gates.js");
 const { configureFeatureGates } = require("../tweaks/codex-lb/feature-gates.js");
 const { parse } = require("../tweaks/codex-lb/vendor/smol-toml.cjs");
@@ -111,12 +111,24 @@ test("custom providers are probed with the credentials Codex sends", () => {
   assert.deepEqual(providers, [
     {
       id: "codex-lb",
-      url: "https://lb.example/backend-api/codex/codex-lb/capabilities?api-version=1",
+      baseUrl: "https://lb.example/backend-api/codex",
+      query: { "api-version": "1" },
       headers: { "X-Static": "1", "X-Env": "env", Authorization: "Bearer secret" },
     },
-    { id: "keyed", url: "https://other.example/v1/codex-lb/capabilities", headers: { Authorization: "Bearer other" } },
+    { id: "keyed", baseUrl: "https://other.example/v1", query: {}, headers: { Authorization: "Bearer other" } },
   ]);
+  assert.equal(
+    providerUrl(providers[0], "/codex-lb/usage", { since: "2026-11-07T00:00:00.000Z" }),
+    "https://lb.example/backend-api/codex/codex-lb/usage?api-version=1&since=2026-11-07T00%3A00%3A00.000Z",
+  );
   assert.deepEqual(customProviders({}, {}), []);
+});
+
+test("new threads use the active profile's provider, else the top-level one", () => {
+  assert.equal(defaultProviderId(parse('model_provider = "codex-lb"')), "codex-lb");
+  assert.equal(defaultProviderId(parse('model_provider = "codex-lb"\nprofile = "work"\n[profiles.work]\nmodel_provider = "other"')), "other");
+  assert.equal(defaultProviderId(parse('profile = "work"\n[profiles.work]\nmodel = "gpt-6.1-sol"')), "openai");
+  assert.equal(defaultProviderId({}), "openai");
 });
 
 function response(status: number, body?: unknown) {
