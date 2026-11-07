@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const commit = process.env.CATALOG_COMMIT ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -13,6 +13,11 @@ const entries = readdirSync("tweaks", { withFileTypes: true }).filter((d) => d.i
   if (manifest.githubRepo !== "DOCaCola/CodexDC-Tweaks") throw new Error("Incorrect manifest repository");
   if (!/^[a-zA-Z0-9_.-]+$/.test(manifest.main)) throw new Error("Invalid tweak entrypoint");
   readFileSync(join(path, manifest.main));
+  if (manifest.iconUrl !== undefined && !/^(https?:|data:)/i.test(manifest.iconUrl)) {
+    const icon = manifest.iconUrl.replace(/^\.\//, "");
+    if (icon.split("/").some((part) => !part || part === "." || part === "..")) throw new Error(`Invalid icon path in ${path}`);
+    if (statSync(join(path, icon)).size > 1024 * 1024) throw new Error(`Icon exceeds 1 MiB in ${path}`);
+  }
   return { id: manifest.id, manifest, repo: manifest.githubRepo, path, approvedCommitSha: commit,
     approvedAt: new Date().toISOString(), approvedBy: "DOCaCola",
     platforms: dir.name === "shell-display-fixes" ? ["win32"] : ["win32", "darwin"],

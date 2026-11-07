@@ -1,8 +1,9 @@
 {
   "id": "local.restart-session-command",
   "name": "Restart Session Command",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Adds /restart-session to restart and reconnect the local Codex backend.",
+  "iconUrl": "./icon.png",
   "scope": "renderer",
   "main": "index.js",
   "permissions": [

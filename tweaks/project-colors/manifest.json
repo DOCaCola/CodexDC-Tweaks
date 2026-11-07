@@ -1,8 +1,9 @@
 {
   "id": "local.project-colors",
   "name": "Project Colors",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Color project folders, titles and conversations in Activity, Recents and Pinned, with optional background tints. Choose presets or custom colors from the project menu or tweak settings.",
+  "iconUrl": "./icon.png",
   "scope": "both",
   "main": "index.js",
   "githubRepo": "DOCaCola/CodexDC-Tweaks",

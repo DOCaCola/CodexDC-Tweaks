@@ -1,8 +1,9 @@
 {
   "id": "local.hide-get-plus-button",
   "name": "Hide Get Plus Button",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Hides the profile upgrade control shown as Get Plus or Upgrade for higher limits.",
+  "iconUrl": "./icon.png",
   "scope": "renderer",
   "main": "index.js",
   "githubRepo": "DOCaCola/CodexDC-Tweaks",
