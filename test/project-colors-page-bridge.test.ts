@@ -16,9 +16,10 @@ function fakeRuntime({ React, Client, site = true }: { React: any, Client: any, 
     settings: 'settingsId(e,t,a){a.d(t,{$I:()=>y,GeneralSettings:()=>x});var n=a("jsx"),eH=a("button"),J=a("menu"),e5=a("colorful");'
       + 'function x(){(0,n.jsx)(eH.vg,{"aria-label":c,className:"w-44",color:"outlineSurface",radius:"full",children:a});'
       + '(0,n.jsxs)(eH.vg,{"aria-label":j,className:"w-full",color:"outlineSurface",radius:"full",children:[a,s]});'
-      + '(0,n.jsx)(J.ms.RadioItem,{value:"custom",onSelect:l});(0,n.jsx)(J.Ab,{align:"end",contentWidth:"menu",triggerButton:i})}}',
-    colorful: 'colorful(e,t,r){var n=r("react");function o(){}var D=1,N={};let P=function(e){return n.createElement(D,o({},e,{colorModel:N}))};'
-      + 'r.d(t,{jI:()=>P});".react-colorful__saturation-pointer"}',
+      + '(0,n.jsx)(J.ms.RadioItem,{value:"custom",onSelect:l});(0,n.jsx)(J.Ab,{align:"end",contentWidth:"menu",triggerButton:i});'
+      + '(0,n.jsx)(e5.jI,{className:"h-34 w-34",color:y,onChange:h})}}',
+    colorful: 'colorful(e,t,r){var n=r("react");function o(){}var D=1,N={};".react-colorful__saturation-pointer";'
+      + 'r.d(t,{},{jI:function(e){return n.createElement(D,o({},e,{colorModel:N}))}})}',
   };
   const exports: Record<string, unknown> = { button: { vg: "NativeTrigger" }, menu: { ms: Menu, Ab: "NativeDropdown" }, colorful: { jI: Picker } };
   const source = (text: string) => ({ toString: () => text });

@@ -48,18 +48,6 @@ async function installPageBridge(enabled, loadModule = url => import(url)) {
     row.setAttribute("data-codexdc-project-thread", JSON.stringify(threadProject(row)));
   };
 
-  // Rspack defines exports as n.d(exports,{name:()=>local},{name:local}).
-  function exportsOf(source) {
-    const names = new Map();
-    for (const match of source.matchAll(/\.d\([$\w]+,\{([^{}]*)\}(?:,\{([^{}]*)\})?\)/g)) {
-      for (const entry of [match[1], match[2] ?? ""].join(",").split(",")) {
-        const parsed = /^([$\w]+):(?:\(\)=>)?([$\w]+)$/.exec(entry);
-        if (parsed) names.set(parsed[2], parsed[1]);
-      }
-    }
-    return names;
-  }
-
   async function loadComponents() {
     // Each app page loads one Rspack runtime entry. Importing the page's own,
     // already evaluated module scripts returns those instances without side effects.
@@ -107,15 +95,19 @@ async function installPageBridge(enabled, loadModule = url => import(url)) {
     const Trigger = member(/\(0,[$\w]+\.jsxs\)\(([$\w]+)\.([$\w]+),\{"aria-label":[^{}]*?color:"outlineSurface"/, "dropdown trigger");
     const Menu = member(/\(0,[$\w]+\.jsx\)\(([$\w]+)\.([$\w]+)\.RadioItem,\{value:"custom"/, "dropdown menu");
     const Dropdown = member(/\(0,[$\w]+\.jsx\)\(([$\w]+)\.([$\w]+),\{align:"end",contentWidth:"menu",triggerButton:/, "dropdown");
-    const pickers = [...new Set(imports.values())].filter(id => {
+    const pickerModules = [...new Set(imports.values())].filter(id => {
       const source = String(runtime.m[id]);
       return source.includes(".react-colorful__saturation-pointer") && source.includes("colorModel:");
     });
-    if (pickers.length !== 1) throw new Error("Unsupported Codex color picker module");
-    const pickerSource = String(runtime.m[pickers[0]]);
-    const pickerLocal = /([$\w]+)=function\(e\)\{return [$\w]+\.createElement\([^;]*?colorModel:/.exec(pickerSource)?.[1];
-    const pickerExport = exportsOf(pickerSource).get(pickerLocal);
-    const Picker = pickerExport && runtime(pickers[0])[pickerExport];
+    if (pickerModules.length !== 1) throw new Error("Unsupported Codex color picker module");
+    const [pickerId] = pickerModules;
+    // Read the component export from the JSX that renders it in Appearance.
+    const pickerExports = new Set();
+    for (const [, local, name] of settings.matchAll(/\(0,[$\w]+\.jsxs?\)\(([$\w]+)\.([$\w]+),/g)) {
+      if (imports.get(local) === pickerId) pickerExports.add(name);
+    }
+    const [pickerExport] = pickerExports;
+    const Picker = pickerExports.size === 1 && runtime(pickerId)[pickerExport];
     if (!Picker) throw new Error("Unsupported Codex color picker interface");
     return { React, client, Trigger, Menu, Dropdown, Picker };
   }
