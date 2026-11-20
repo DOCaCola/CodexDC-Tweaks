@@ -247,6 +247,10 @@ function appPage(threadProvider: string | null) {
     url: "app://-/index.html",
     runScripts: "outside-only",
     pretendToBeVisual: true,
+    beforeParse(window) {
+      // JSDOM creates its own Date. Use the clock controlled by the test runner.
+      window.Date = Date;
+    },
   });
   const { document } = dom.window;
   const fiber = (props: object, parent: object | null, memoizedState: object | null = null) => ({ memoizedProps: props, memoizedState, return: parent });
@@ -269,12 +273,12 @@ function usageState(defaultProvider = "codex-lb") {
   return {
     defaultProvider,
     refreshing: false,
-    providers: [{ id: "codex-lb", dashboard: "https://lb.example/", snapshot: SNAPSHOT, fetchedAt: "2026-11-07T11:00:00Z", error: null }],
+    providers: [{ id: "codex-lb", dashboard: "https://lb.example/", snapshot: SNAPSHOT, fetchedAt: SNAPSHOT.generated_at, error: null }],
   };
 }
 
-test("the popover leads with the pool serving the chat's model and replaces the stock menu", async () => {
-  mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-07T11:00:00Z") });
+test("the popover leads with the pool serving the chat's model and replaces the stock menu", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(SNAPSHOT.generated_at) });
   const { dom, document, configure, stockOpened } = appPage("codex-lb");
   try {
     assert.deepEqual(JSON.parse(JSON.stringify(configure(usageState()))), { status: "active", button: true });
@@ -333,7 +337,6 @@ test("the popover leads with the pool serving the chat's model and replaces the 
     assert.equal(stockOpened(), 1);
   } finally {
     dom.window.close();
-    mock.timers.reset();
   }
 });
 
